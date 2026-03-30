@@ -1,21 +1,40 @@
 {
   "name": "@quonfig/javascript",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Feature Flags & Dynamic Configuration — Browser/Client SDK",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "author": "Quonfig",
-  "license": "ISC",
+  "license": "MIT",
   "scripts": {
     "build": "rm -rf dist/ && tsc",
     "bundle": "esbuild --minify --target=esnext --bundle --outfile=dist/quonfig.bundle.js --global-name=window.quonfigNamespace dist/index.js && echo 'window.quonfig = window.quonfigNamespace.quonfig' >> dist/quonfig.bundle.js",
     "lint": "eslint --ext .ts,.tsx src/",
-    "test": "npm run build && jest --verbose --detectOpenHandles dist/"
+    "test": "npm run build && jest --verbose --detectOpenHandles dist/",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/quonfig/sdk-javascript.git"
+  },
+  "homepage": "https://github.com/quonfig/sdk-javascript#readme",
+  "bugs": {
+    "url": "https://github.com/quonfig/sdk-javascript/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "feature-flags",
