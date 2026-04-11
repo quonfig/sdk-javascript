@@ -111,3 +111,19 @@ export type ShouldLogArgs = {
   desiredLevel: string;
   defaultLevel: string;
 };
+
+/**
+ * Open interface for CLI codegen — extended by `qfg generate --targets react-ts`.
+ * The generated quonfig-client-types.d.ts uses `declare module` augmentation to inject
+ * flag keys and their exact types into this interface.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+export interface FrontEndConfigurationRaw {}
+
+/**
+ * Resolves to a typed flag map when FrontEndConfigurationRaw has been extended by codegen,
+ * or falls back to Record<string, unknown> for untyped usage.
+ */
+export type TypedFrontEndConfigurationRaw = keyof FrontEndConfigurationRaw extends never
+  ? Record<string, unknown>
+  : { [K in keyof FrontEndConfigurationRaw]: FrontEndConfigurationRaw[K] };

@@ -267,6 +267,39 @@ export class Quonfig {
     this.loaded = true;
   }
 
+  /**
+   * Seed the client with pre-evaluated flags (e.g. for SSR hydration).
+   * Flags are flat key-value pairs: { flagKey: value }.
+   */
+  hydrate(flags: Record<string, unknown>): void {
+    const configs: { [key: string]: Config } = { ...this._configs };
+    Object.keys(flags).forEach((key) => {
+      const value = flags[key] as ConfigValue;
+      const type =
+        typeof value === "boolean"
+          ? "bool"
+          : typeof value === "number"
+            ? Number.isInteger(value)
+              ? "int"
+              : "double"
+            : "string";
+      configs[key] = new Config(key, value, type);
+    });
+    this._configs = configs;
+    this.loaded = true;
+  }
+
+  /**
+   * Extract the current evaluated config as a flat key-value map.
+   */
+  extract(): Record<string, ConfigValue> {
+    const result: Record<string, ConfigValue> = {};
+    Object.keys(this._configs).forEach((key) => {
+      result[key] = this._configs[key].value;
+    });
+    return result;
+  }
+
   // -- Query Methods --
 
   /**

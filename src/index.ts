@@ -15,6 +15,8 @@ import type {
   ContextUploadMode,
   ConfigEvaluationMetadata,
   ConfigEvaluationCounter,
+  FrontEndConfigurationRaw,
+  TypedFrontEndConfigurationRaw,
 } from "./types";
 
 export {
@@ -46,4 +48,6 @@ export {
   ContextUploadMode,
   ConfigEvaluationMetadata,
   ConfigEvaluationCounter,
+  FrontEndConfigurationRaw,
+  TypedFrontEndConfigurationRaw,
 };
