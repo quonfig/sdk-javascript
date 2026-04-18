@@ -21,7 +21,7 @@
     "build": "rm -rf dist/ && tsc",
     "bundle": "esbuild --minify --target=esnext --bundle --outfile=dist/quonfig.bundle.js --global-name=window.quonfigNamespace dist/index.js && echo 'window.quonfig = window.quonfigNamespace.quonfig' >> dist/quonfig.bundle.js",
     "lint": "eslint --ext .ts,.tsx src/",
-    "test": "npm run build && jest --verbose --detectOpenHandles dist/",
+    "test": "npm run build && jest --verbose --detectOpenHandles dist/ test/",
     "prepublishOnly": "npm run build"
   },
   "repository": {

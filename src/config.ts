@@ -50,12 +50,9 @@ const parseValue = (ev: EvaluatedValue, key: string): ConfigValue => {
     case "string":
       return value as string;
     case "json":
-      try {
-        return typeof value === "string" ? JSON.parse(value) : value;
-      } catch (e) {
-        console.error(`Error parsing JSON from quonfig config ${key}`, e, value);
-        return value;
-      }
+      // Server now always sends native JSON (object/array/number/boolean/null).
+      // Stringified JSON is no longer supported — see repo-wide migration.
+      return value as ConfigValue;
     case "string_list":
       return value as string[];
     case "duration":
