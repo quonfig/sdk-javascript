@@ -50,8 +50,14 @@ const parseValue = (ev: EvaluatedValue, key: string): ConfigValue => {
     case "string":
       return value as string;
     case "json":
-      // Server now always sends native JSON (object/array/number/boolean/null).
-      // Stringified JSON is no longer supported — see repo-wide migration.
+      // Server always sends native JSON (object/array/number/boolean/null).
+      // Stringified JSON is illegal on the wire — reject loudly to match
+      // sdk-go and sdk-python. No silent pass-through, no JSON.parse fallback.
+      if (typeof value === "string") {
+        throw new Error(
+          "json value must be a native JSON type (object/array/number/boolean/null); stringified JSON is no longer allowed"
+        );
+      }
       return value as ConfigValue;
     case "string_list":
       return value as string[];

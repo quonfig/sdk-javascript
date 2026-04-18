@@ -45,9 +45,11 @@ describe("Config.digest — json valueType", () => {
     expect(Array.isArray(configs["my.list"].value)).toBe(true);
   });
 
-  test("does NOT parse stringified json — string fallback is gone", () => {
-    // Server now always sends native. If a stringified value ever leaks through,
-    // we return it as-is rather than silently JSON.parse-ing it.
+  test("throws on stringified json — strict wire contract, matches sdk-go / sdk-python", () => {
+    // Server now always sends native. If a stringified value ever leaks
+    // through, the SDK must reject it loudly — matches sdk-go (unmarshal
+    // reject) and sdk-python (QuonfigValueTypeError). No silent
+    // pass-through or JSON.parse fallback.
     const payload = {
       evaluations: {
         "legacy.str": {
@@ -59,9 +61,9 @@ describe("Config.digest — json valueType", () => {
       },
     };
 
-    const configs = Config.digest(payload);
-    expect(configs["legacy.str"].value).toBe('{"foo":"bar"}');
-    expect(typeof configs["legacy.str"].value).toBe("string");
+    expect(() => Config.digest(payload)).toThrow(
+      /json value must be a native JSON type/
+    );
   });
 
   test("returns native scalar json values (number, bool, null)", () => {
