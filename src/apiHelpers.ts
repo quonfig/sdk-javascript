@@ -18,7 +18,4 @@ export const headers = (sdkKey: string, _clientVersion: string) => ({
 });
 
 export const DEFAULT_TIMEOUT = 10000;
-export const DEFAULT_API_URLS = [
-  "https://primary.quonfig.com",
-  "https://secondary.quonfig.com",
-];
+export const DEFAULT_API_URLS = ["https://primary.quonfig.com"];

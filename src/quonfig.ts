@@ -58,7 +58,6 @@ export class Quonfig {
   async init({
     sdkKey,
     context,
-    apiUrl,
     apiUrls,
     telemetryUrl,
     timeout,
@@ -79,7 +78,6 @@ export class Quonfig {
     this.loader = new Loader({
       sdkKey,
       contexts: context,
-      apiUrl,
       apiUrls,
       timeout,
       contextUploadMode,

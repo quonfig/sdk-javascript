@@ -5,8 +5,6 @@ import type { Contexts, EvaluationPayload, ContextUploadMode } from "./types";
 export type LoaderParams = {
   sdkKey: string;
   contexts: Contexts;
-  /** @deprecated Use apiUrls instead. */
-  apiUrl?: string;
   /** Ordered list of API base URLs to try for failover. */
   apiUrls?: string[];
   timeout?: number;
@@ -27,7 +25,6 @@ export default class Loader {
   constructor({
     sdkKey,
     contexts,
-    apiUrl,
     apiUrls,
     timeout,
     contextUploadMode = "periodic_example",
@@ -35,8 +32,8 @@ export default class Loader {
   }: LoaderParams) {
     this.sdkKey = sdkKey;
     this.contexts = contexts;
-    this.apiUrls = (apiUrls ?? (apiUrl ? [apiUrl] : DEFAULT_API_URLS)).map(
-      (u) => u.replace(/\/$/, "")
+    this.apiUrls = (apiUrls ?? DEFAULT_API_URLS).map((u) =>
+      u.replace(/\/$/, "")
     );
     if (this.apiUrls.length === 0) {
       throw new Error("apiUrls must not be empty");

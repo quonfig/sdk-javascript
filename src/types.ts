@@ -82,9 +82,7 @@ export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
 export type InitOptions = {
   sdkKey: string;
   context: Contexts;
-  /** @deprecated Use apiUrls instead. If provided, used as a single-element URL list. */
-  apiUrl?: string;
-  /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com", "https://secondary.quonfig.com"]. */
+  /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com"]. */
   apiUrls?: string[];
   /** Base URL for the dedicated telemetry service. Defaults to https://telemetry.quonfig.com. */
   telemetryUrl?: string;
