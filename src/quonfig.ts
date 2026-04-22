@@ -4,12 +4,9 @@ import { Config } from "./config";
 import { contextsEqual, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader from "./loader";
-import {
-  PREFIX as loggerPrefix,
-  isValidLogLevel,
-  shouldLog,
-  type Severity,
-} from "./logger";
+import { isValidLogLevel, shouldLog, type Severity } from "./logger";
+
+const LOG_LEVEL_KEY_PREFIX = "log-level";
 import TelemetryUploader from "./telemetry/uploader";
 import { LoggerAggregator } from "./telemetry/loggerAggregator";
 import version from "./version";
@@ -312,7 +309,7 @@ export class Quonfig {
    */
   get(key: string): ConfigValue {
     if (!this.loaded) {
-      if (!key.startsWith(loggerPrefix)) {
+      if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
         console.warn(
           `Quonfig warning: The client has not finished loading data yet. Unable to look up actual value for key "${key}".`
         );
@@ -323,7 +320,7 @@ export class Quonfig {
     const config = this.configs[key];
     const value = config?.value;
 
-    if (!key.startsWith(loggerPrefix)) {
+    if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
       if (this._collectEvaluationSummaries) {
         setTimeout(() => this.evaluationSummaryAggregator?.record(config));
       }
@@ -360,7 +357,7 @@ export class Quonfig {
     if (this._collectLoggerNames && isValidLogLevel(args.desiredLevel)) {
       const record = () =>
         this.loggerAggregator?.record(
-          args.loggerName,
+          args.configKey,
           args.desiredLevel.toUpperCase() as Severity
         );
       if (async) {

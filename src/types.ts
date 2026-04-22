@@ -105,7 +105,7 @@ export type ConfigEvaluationCounter = Omit<ConfigEvaluationMetadata, "configType
  * Arguments for the shouldLog method.
  */
 export type ShouldLogArgs = {
-  loggerName: string;
+  configKey: string;
   desiredLevel: string;
   defaultLevel: string;
 };

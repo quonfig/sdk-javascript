@@ -59,11 +59,12 @@ export abstract class PeriodicSync<T> {
 
   protected logInternal(message: string): void {
     const loggerName = `quonfig-javascript.quonfig.${this.name}`;
+    const configKey = `log-level.${loggerName}`;
 
     if (
       this.client.shouldLog(
         {
-          loggerName,
+          configKey,
           desiredLevel: "debug",
           defaultLevel: "error",
         },
