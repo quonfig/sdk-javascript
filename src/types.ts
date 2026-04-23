@@ -91,7 +91,24 @@ export type InitOptions = {
   collectEvaluationSummaries?: boolean;
   collectLoggerNames?: boolean;
   contextUploadMode?: ContextUploadMode;
+  /**
+   * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.
+   *
+   * When set (e.g. `"log-level.my-app"`), callers can invoke
+   * `shouldLog({loggerPath: "com.myapp.Auth", desiredLevel: "DEBUG"})` and
+   * the SDK will evaluate the named config with the logger path injected
+   * as `contexts["quonfig-sdk-logging"] = { key: loggerPath }` for telemetry
+   * auto-capture. Using the `key` property means logger paths flow to the
+   * dashboard via the existing example-context telemetry machinery.
+   *
+   * Callers retain the escape hatch of passing `configKey` directly to
+   * `shouldLog`.
+   */
+  loggerKey?: string;
 };
+
+/** Context name under which the logger-path convenience injects the logger path. */
+export const QUONFIG_SDK_LOGGING_CONTEXT_NAME = "quonfig-sdk-logging";
 
 /**
  * Telemetry counter for a single config evaluation.
@@ -102,13 +119,20 @@ export type ConfigEvaluationCounter = Omit<ConfigEvaluationMetadata, "configType
 };
 
 /**
- * Arguments for the shouldLog method.
+ * Arguments for the shouldLog method. Two shapes are supported:
+ *
+ * 1. `{configKey, ...}` — primitive shape. Evaluates the named config as a
+ *    log level. The caller is responsible for any per-logger routing.
+ *
+ * 2. `{loggerPath, ...}` — convenience shape. Requires `loggerKey` on init.
+ *    The SDK uses `loggerKey` as the underlying config key and injects
+ *    `contexts["quonfig-sdk-logging"] = { key: loggerPath }` so the logger
+ *    path is recorded in telemetry (via the existing example-context
+ *    machinery). `loggerPath` is passed through without normalization.
  */
-export type ShouldLogArgs = {
-  configKey: string;
-  desiredLevel: string;
-  defaultLevel: string;
-};
+export type ShouldLogArgs =
+  | { configKey: string; desiredLevel: string; defaultLevel: string }
+  | { loggerPath: string; desiredLevel: string; defaultLevel?: string };
 
 /**
  * Open interface for CLI codegen — extended by `qfg generate --targets react-ts`.

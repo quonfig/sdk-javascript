@@ -17,8 +17,8 @@ import type {
   EvaluationCallback,
   EvaluationPayload,
   InitOptions,
-  ShouldLogArgs,
 } from "./types";
+import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 
 type PollStatus =
   | { status: "not-started" }
@@ -43,6 +43,7 @@ export class Quonfig {
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
   private loggerAggregator: LoggerAggregator | undefined;
   private _contexts: Contexts = {};
+  private _loggerKey: string | undefined;
 
   public clientNameString = "quonfig-javascript";
   public loaded = false;
@@ -62,6 +63,7 @@ export class Quonfig {
     collectEvaluationSummaries = true,
     collectLoggerNames = false,
     contextUploadMode = "periodic_example",
+    loggerKey,
   }: InitOptions): Promise<void> {
     if (!context) {
       throw new Error("Context must be provided");
@@ -69,6 +71,7 @@ export class Quonfig {
 
     validateContexts(context);
     this._contexts = context;
+    this._loggerKey = loggerKey;
 
     const clientVersionString = `${this.clientNameString}-${version}`;
 
@@ -143,6 +146,11 @@ export class Quonfig {
 
   get telemetryUploader(): TelemetryUploader | undefined {
     return this._telemetryUploader;
+  }
+
+  /** The init-time `loggerKey` used by the `shouldLog({loggerPath, ...})` overload. */
+  get loggerKey(): string | undefined {
+    return this._loggerKey;
   }
 
   // -- Core Methods --
@@ -352,12 +360,91 @@ export class Quonfig {
 
   /**
    * Determine whether a log message at the given level should be emitted.
+   *
+   * Two shapes are supported:
+   *
+   * 1. `{configKey, ...}` — primitive shape. Evaluates the named config as a
+   *    log level. The caller is responsible for any per-logger routing.
+   *
+   * 2. `{loggerPath, ...}` — convenience shape. Requires `loggerKey` on
+   *    `init()`. The SDK uses `loggerKey` as the underlying config key and
+   *    injects `contexts["quonfig-sdk-logging"] = { key: loggerPath }` into
+   *    the live client contexts so the logger path is auto-captured by the
+   *    existing example-context telemetry. `loggerPath` is passed through
+   *    without normalization.
    */
-  shouldLog(args: ShouldLogArgs, async = true): boolean {
+  shouldLog(args: {
+    configKey: string;
+    desiredLevel: string;
+    defaultLevel: string;
+  }, async?: boolean): boolean;
+  shouldLog(args: {
+    loggerPath: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+  }, async?: boolean): boolean;
+  shouldLog(
+    args: {
+      configKey?: string;
+      loggerPath?: string;
+      desiredLevel: string;
+      defaultLevel?: string;
+    },
+    async: boolean = true
+  ): boolean {
+    let resolvedConfigKey: string;
+    // Default fallback matches sdk-node (WARN).
+    let resolvedDefaultLevel = args.defaultLevel ?? "WARN";
+    // The name recorded in logger-name telemetry: for the loggerPath form we
+    // prefer the logger path itself (the thing the user cares about), for the
+    // configKey form we keep the old behavior of recording the config key.
+    let telemetryName: string;
+
+    if (args.loggerPath !== undefined) {
+      if (args.configKey !== undefined) {
+        throw new Error(
+          "[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both."
+        );
+      }
+      if (!this._loggerKey) {
+        throw new Error(
+          "[quonfig] shouldLog({loggerPath}) requires the `loggerKey` option on quonfig.init(). " +
+            'Pass `loggerKey: "log-level.<your-app>"` or use the `configKey` form instead.'
+        );
+      }
+      resolvedConfigKey = this._loggerKey;
+      telemetryName = args.loggerPath;
+
+      // Publish the logger path under the `quonfig-sdk-logging` context name
+      // using a `key` property. This matches the sdk-node/sdk-go/sdk-ruby
+      // shape exactly and is load-bearing for example-context telemetry
+      // auto-capture: the dashboard harvests contexts that carry a `key`, so
+      // logger paths flow through for free.
+      //
+      // Note: in the browser SDK, config evaluation happens server-side, so
+      // this does not influence the current request's rule evaluation. It
+      // does, however, make the injected context visible to telemetry and
+      // to any future `updateContext` / loader re-fetch.
+      this._contexts = {
+        ...this._contexts,
+        [QUONFIG_SDK_LOGGING_CONTEXT_NAME]: { key: args.loggerPath },
+      };
+      if (this.loader) {
+        this.loader.contexts = this._contexts;
+      }
+    } else if (args.configKey !== undefined) {
+      resolvedConfigKey = args.configKey;
+      telemetryName = args.configKey;
+    } else {
+      throw new Error(
+        "[quonfig] shouldLog requires either `configKey` or `loggerPath`."
+      );
+    }
+
     if (this._collectLoggerNames && isValidLogLevel(args.desiredLevel)) {
       const record = () =>
         this.loggerAggregator?.record(
-          args.configKey,
+          telemetryName,
           args.desiredLevel.toUpperCase() as Severity
         );
       if (async) {
@@ -367,7 +454,12 @@ export class Quonfig {
       }
     }
 
-    return shouldLog({ ...args, get: this.get.bind(this) });
+    return shouldLog({
+      configKey: resolvedConfigKey,
+      desiredLevel: args.desiredLevel,
+      defaultLevel: resolvedDefaultLevel,
+      get: this.get.bind(this),
+    });
   }
 
   /**
