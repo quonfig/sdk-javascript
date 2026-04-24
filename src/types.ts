@@ -74,7 +74,7 @@ export type EvaluationCallback = (
 /**
  * Context upload mode for telemetry.
  */
-export type ContextUploadMode = "none" | "shapes_only" | "periodic_example";
+export type CollectContextMode = "NONE" | "SHAPE_ONLY" | "PERIODIC_EXAMPLE";
 
 /**
  * Options passed to quonfig.init().
@@ -90,7 +90,7 @@ export type InitOptions = {
   afterEvaluationCallback?: EvaluationCallback;
   collectEvaluationSummaries?: boolean;
   collectLoggerNames?: boolean;
-  contextUploadMode?: ContextUploadMode;
+  collectContextMode?: CollectContextMode;
   /**
    * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.
    *

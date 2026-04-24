@@ -62,7 +62,7 @@ export class Quonfig {
     afterEvaluationCallback = () => {},
     collectEvaluationSummaries = true,
     collectLoggerNames = false,
-    contextUploadMode = "periodic_example",
+    collectContextMode = "PERIODIC_EXAMPLE",
     loggerKey,
   }: InitOptions): Promise<void> {
     if (!context) {
@@ -80,7 +80,7 @@ export class Quonfig {
       contexts: context,
       apiUrls,
       timeout,
-      contextUploadMode,
+      collectContextMode,
       clientVersion: clientVersionString,
     });
 

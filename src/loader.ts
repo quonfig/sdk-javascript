@@ -1,6 +1,6 @@
 import { headers, DEFAULT_TIMEOUT, DEFAULT_API_URLS } from "./apiHelpers";
 import { encodeContexts } from "./context";
-import type { Contexts, EvaluationPayload, ContextUploadMode } from "./types";
+import type { Contexts, EvaluationPayload, CollectContextMode } from "./types";
 
 export type LoaderParams = {
   sdkKey: string;
@@ -8,7 +8,7 @@ export type LoaderParams = {
   /** Ordered list of API base URLs to try for failover. */
   apiUrls?: string[];
   timeout?: number;
-  contextUploadMode?: ContextUploadMode;
+  collectContextMode?: CollectContextMode;
   clientVersion?: string;
 };
 
@@ -17,7 +17,7 @@ export default class Loader {
   contexts: Contexts;
   apiUrls: string[];
   timeout: number;
-  contextUploadMode: ContextUploadMode;
+  collectContextMode: CollectContextMode;
   clientVersion: string;
   abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
   abortController: AbortController | undefined;
@@ -27,7 +27,7 @@ export default class Loader {
     contexts,
     apiUrls,
     timeout,
-    contextUploadMode = "periodic_example",
+    collectContextMode = "PERIODIC_EXAMPLE",
     clientVersion = "",
   }: LoaderParams) {
     this.sdkKey = sdkKey;
@@ -39,13 +39,13 @@ export default class Loader {
       throw new Error("apiUrls must not be empty");
     }
     this.timeout = timeout || DEFAULT_TIMEOUT;
-    this.contextUploadMode = contextUploadMode;
+    this.collectContextMode = collectContextMode;
     this.clientVersion = clientVersion;
   }
 
   url(apiUrl: string): string {
     const encodedContext = encodeContexts(this.contexts);
-    return `${apiUrl}/api/v2/configs/eval-with-context/${encodedContext}`;
+    return `${apiUrl}/api/v2/configs/eval-with-context/${encodedContext}?collectContextMode=${this.collectContextMode}`;
   }
 
   load(): Promise<EvaluationPayload> {
