@@ -7,6 +7,7 @@ import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 import type {
   ConfigValue,
   Contexts,
+  ContextObj,
   ContextValue,
   Duration,
   EvaluationPayload,
@@ -43,6 +44,7 @@ export {
   // Types
   ConfigValue,
   Contexts,
+  ContextObj,
   ContextValue,
   Duration,
   EvaluationPayload,

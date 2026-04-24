@@ -1,12 +1,22 @@
 /**
- * Context value types — primitives only. Nested objects are not supported.
+ * Context value type. Inner values are typed as `unknown` so callers can pass
+ * loose objects (e.g. a request payload) without upfront narrowing; the
+ * evaluator does runtime type checks per operator. Nested objects are still
+ * not meaningful — only scalars and string arrays match any operator at
+ * runtime.
  */
-export type ContextValue = number | string | boolean;
+export type ContextValue = unknown;
 
 /**
  * Contexts is a map of context type (e.g. "user", "device") to key-value pairs.
  */
 export type Contexts = { [key: string]: Record<string, ContextValue> };
+
+/**
+ * Alias for Reforge-compatible naming. With ContextValue widened to unknown,
+ * Contexts and ContextObj resolve to the same structural type.
+ */
+export type ContextObj = Contexts;
 
 /**
  * A duration value with both millisecond and second representations.
