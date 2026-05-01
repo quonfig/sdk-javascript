@@ -45,7 +45,12 @@ export class Quonfig {
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
 
-  public clientNameString = "quonfig-javascript";
+  // SDK identity reported in telemetry. Wrappers (e.g. @quonfig/react)
+  // overwrite these on init so each wrapper SDK shows up distinctly in the
+  // telemetry tables, with its own semver. Defaults are the values reported
+  // when this SDK is used directly from a browser.
+  public clientName = "javascript";
+  public clientVersion: string = version;
   public loaded = false;
   public loader: Loader | undefined;
   public afterEvaluationCallback: EvaluationCallback = () => {};
@@ -57,6 +62,7 @@ export class Quonfig {
     sdkKey,
     context,
     apiUrls,
+    apiUrl,
     telemetryUrl,
     timeout,
     afterEvaluationCallback = () => {},
@@ -73,12 +79,18 @@ export class Quonfig {
     this._contexts = context;
     this._loggerKey = loggerKey;
 
-    const clientVersionString = `${this.clientNameString}-${version}`;
+    // Accept singular `apiUrl` as an alias for `apiUrls`. `apiUrls` wins if both
+    // are provided. Mirrors the normalization @quonfig/react already does on
+    // its provider props (qfg-f4g) so a staging caller passing the singular
+    // form doesn't silently fall back to the prod default URLs.
+    const resolvedApiUrls = apiUrls ?? (apiUrl ? [apiUrl] : undefined);
+
+    const clientVersionString = `${this.clientName}-${this.clientVersion}`;
 
     this.loader = new Loader({
       sdkKey,
       contexts: context,
-      apiUrls,
+      apiUrls: resolvedApiUrls,
       timeout,
       collectContextMode,
       clientVersion: clientVersionString,

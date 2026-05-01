@@ -2,7 +2,6 @@ import { PeriodicSync } from "./periodicSync";
 import { Config } from "../config";
 import type { ConfigEvaluationMetadata, ConfigEvaluationCounter } from "../types";
 import type { Quonfig } from "../quonfig";
-import version from "../version";
 
 type ConfigEvaluationSummary = {
   key: string;
@@ -115,8 +114,8 @@ export class EvaluationSummaryAggregator extends PeriodicSync<ConfigEvaluationCo
   private buildEvents(summaries: ConfigEvaluationSummaries): TelemetryEvents {
     return {
       instanceHash: this.client.instanceHash,
-      clientName: "javascript",
-      clientVersion: version,
+      clientName: this.client.clientName,
+      clientVersion: this.client.clientVersion,
       events: [{ summaries }],
     };
   }

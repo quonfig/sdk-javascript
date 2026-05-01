@@ -1,2 +1,2 @@
-// THIS FILE IS GENERATED
-export default "0.1.0";
+// AUTO-GENERATED from package.json by scripts/generate-version.mjs — do not edit.
+export default "0.0.11";

@@ -99,6 +99,12 @@ export type InitOptions = {
    */
   apiUrls?: string[];
   /**
+   * Convenience alias for callers with a single API base URL. Normalized to
+   * `apiUrls = [apiUrl]` when `apiUrls` is not provided. `apiUrls` wins if both
+   * are set. Mirrors the singular form accepted by `@quonfig/react`.
+   */
+  apiUrl?: string;
+  /**
    * Base URL for the dedicated telemetry service.
    * Defaults to `https://telemetry.${QUONFIG_DOMAIN ?? "quonfig.com"}`.
    */

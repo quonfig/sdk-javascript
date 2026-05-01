@@ -1,7 +1,6 @@
 import type { Severity } from "../logger";
 import { PeriodicSync } from "./periodicSync";
 import type { Quonfig } from "../quonfig";
-import version from "../version";
 
 type LoggerCounter = {
   loggerName: string;
@@ -82,8 +81,8 @@ export class LoggerAggregator extends PeriodicSync<LoggerCounter> {
   private buildEvents(loggers: LoggersTelemetryEvent): TelemetryEvents {
     return {
       instanceHash: this.client.instanceHash,
-      clientName: "javascript",
-      clientVersion: version,
+      clientName: this.client.clientName,
+      clientVersion: this.client.clientVersion,
       events: [{ loggers }],
     };
   }
