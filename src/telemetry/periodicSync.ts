@@ -21,7 +21,7 @@ export abstract class PeriodicSync<T> {
     clearTimeout(this.timeoutID);
   }
 
-  sync(): void {
+  async sync(): Promise<void> {
     if (this.data.size === 0) return;
 
     this.logInternal(`${this.name} syncing ${this.data.size} items`);
@@ -29,10 +29,10 @@ export abstract class PeriodicSync<T> {
     const startAtWas = this.startAt;
     this.startAt = new Date();
 
-    this.flush(this.prepareData(), startAtWas);
+    await this.flush(this.prepareData(), startAtWas);
   }
 
-  protected abstract flush(toShip: Map<string, T>, startAtWas: Date): void;
+  protected abstract flush(toShip: Map<string, T>, startAtWas: Date): Promise<unknown> | void;
 
   private prepareData(): Map<string, T> {
     const toShip = new Map(this.data);

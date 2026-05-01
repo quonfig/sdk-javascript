@@ -259,15 +259,29 @@ export class Quonfig {
   }
 
   /**
-   * Tear down the SDK: stop polling and telemetry.
+   * Drain in-memory telemetry counters by POSTing them to the telemetry
+   * endpoint. Use this when you want to ensure counters are shipped without
+   * tearing down the SDK (e.g. before a context swap in a long-lived SPA).
    */
-  close(): void {
+  async flush(): Promise<void> {
+    await Promise.all([
+      this.evaluationSummaryAggregator?.sync(),
+      this.loggerAggregator?.sync(),
+    ]);
+  }
+
+  /**
+   * Tear down the SDK: drain telemetry, then stop polling and telemetry timers.
+   */
+  async close(): Promise<void> {
+    await this.flush();
     this.stopPolling();
     this.stopTelemetry();
   }
 
   /**
-   * Stop telemetry aggregators.
+   * Stop telemetry aggregator timers without draining. Prefer `close()` or
+   * `flush()` for normal teardown — those drain pending counters first.
    */
   stopTelemetry(): void {
     this.evaluationSummaryAggregator?.stop();
