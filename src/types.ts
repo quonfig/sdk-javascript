@@ -92,9 +92,16 @@ export type CollectContextMode = "NONE" | "SHAPE_ONLY" | "PERIODIC_EXAMPLE";
 export type InitOptions = {
   sdkKey: string;
   context: Contexts;
-  /** Ordered list of API base URLs to try. Defaults to ["https://primary.quonfig.com"]. */
+  /**
+   * Ordered list of API base URLs to try (failover order).
+   * Defaults derive from `QUONFIG_DOMAIN` (env var, falls back to "quonfig.com"):
+   * `["https://primary.${DOMAIN}", "https://secondary.${DOMAIN}"]`.
+   */
   apiUrls?: string[];
-  /** Base URL for the dedicated telemetry service. Defaults to https://telemetry.quonfig.com. */
+  /**
+   * Base URL for the dedicated telemetry service.
+   * Defaults to `https://telemetry.${QUONFIG_DOMAIN ?? "quonfig.com"}`.
+   */
   telemetryUrl?: string;
   timeout?: number;
   afterEvaluationCallback?: EvaluationCallback;

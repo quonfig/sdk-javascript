@@ -1,4 +1,4 @@
-import { headers, DEFAULT_TIMEOUT, DEFAULT_API_URLS } from "./apiHelpers";
+import { headers, DEFAULT_TIMEOUT, getDefaultApiUrls } from "./apiHelpers";
 import { encodeContexts } from "./context";
 import type { Contexts, EvaluationPayload, CollectContextMode } from "./types";
 
@@ -32,7 +32,7 @@ export default class Loader {
   }: LoaderParams) {
     this.sdkKey = sdkKey;
     this.contexts = contexts;
-    this.apiUrls = (apiUrls ?? DEFAULT_API_URLS).map((u) =>
+    this.apiUrls = (apiUrls ?? getDefaultApiUrls()).map((u) =>
       u.replace(/\/$/, "")
     );
     if (this.apiUrls.length === 0) {

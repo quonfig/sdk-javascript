@@ -1,6 +1,4 @@
-import { headers, DEFAULT_TIMEOUT } from "../apiHelpers";
-
-export const DEFAULT_TELEMETRY_URL = "https://telemetry.quonfig.com";
+import { headers, DEFAULT_TIMEOUT, getDefaultTelemetryUrl } from "../apiHelpers";
 
 export type TelemetryUploaderParams = {
   sdkKey: string;
@@ -18,7 +16,7 @@ export default class TelemetryUploader {
 
   constructor({ sdkKey, telemetryUrl, timeout, clientVersion }: TelemetryUploaderParams) {
     this.sdkKey = sdkKey;
-    this.telemetryUrl = telemetryUrl || DEFAULT_TELEMETRY_URL;
+    this.telemetryUrl = telemetryUrl || getDefaultTelemetryUrl();
     this.timeout = timeout || DEFAULT_TIMEOUT;
     this.clientVersion = clientVersion;
   }
