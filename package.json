@@ -1,6 +1,6 @@
 {
   "name": "@quonfig/javascript",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Feature Flags & Dynamic Configuration — Browser/Client SDK",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
