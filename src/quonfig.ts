@@ -61,6 +61,7 @@ export class Quonfig {
   async init({
     sdkKey,
     context,
+    domain,
     apiUrls,
     apiUrl,
     telemetryUrl,
@@ -91,6 +92,7 @@ export class Quonfig {
       sdkKey,
       contexts: context,
       apiUrls: resolvedApiUrls,
+      domain,
       timeout,
       collectContextMode,
       clientVersion: clientVersionString,
@@ -99,6 +101,7 @@ export class Quonfig {
     this._telemetryUploader = new TelemetryUploader({
       sdkKey,
       telemetryUrl,
+      domain,
       timeout,
       clientVersion: clientVersionString,
     });

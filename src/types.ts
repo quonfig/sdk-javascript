@@ -93,9 +93,21 @@ export type InitOptions = {
   sdkKey: string;
   context: Contexts;
   /**
-   * Ordered list of API base URLs to try (failover order).
-   * Defaults derive from `QUONFIG_DOMAIN` (env var, falls back to "quonfig.com"):
-   * `["https://primary.${DOMAIN}", "https://secondary.${DOMAIN}"]`.
+   * Single knob that flips api + telemetry URLs in lockstep. Documented path
+   * for pointing a browser app at staging or local dev:
+   *   `domain: "quonfig-staging.com"` →
+   *     api:        https://primary.quonfig-staging.com (+ secondary)
+   *     telemetry:  https://telemetry.quonfig-staging.com
+   *   `domain: "quonfig.localhost"` → same shape against the local dev proxy.
+   *
+   * Resolution order (highest wins): explicit `apiUrls`/`telemetryUrl` >
+   * `domain` init option > `process.env.QUONFIG_DOMAIN` > `"quonfig.com"`.
+   */
+  domain?: string;
+  /**
+   * Ordered list of API base URLs to try (failover order). Escape hatch for
+   * deploys that don't follow the `primary.${domain}` / `secondary.${domain}`
+   * convention. When set, wins over `domain`.
    */
   apiUrls?: string[];
   /**
@@ -105,8 +117,8 @@ export type InitOptions = {
    */
   apiUrl?: string;
   /**
-   * Base URL for the dedicated telemetry service.
-   * Defaults to `https://telemetry.${QUONFIG_DOMAIN ?? "quonfig.com"}`.
+   * Base URL for the dedicated telemetry service. Escape hatch for deploys
+   * that split telemetry off the primary domain. When set, wins over `domain`.
    */
   telemetryUrl?: string;
   timeout?: number;

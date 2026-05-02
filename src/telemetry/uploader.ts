@@ -3,6 +3,11 @@ import { headers, DEFAULT_TIMEOUT, getDefaultTelemetryUrl } from "../apiHelpers"
 export type TelemetryUploaderParams = {
   sdkKey: string;
   telemetryUrl?: string;
+  /**
+   * Active domain used to derive the default telemetryUrl when omitted.
+   * See `InitOptions.domain` for resolution order.
+   */
+  domain?: string;
   timeout?: number;
   clientVersion: string;
 };
@@ -14,9 +19,9 @@ export default class TelemetryUploader {
   clientVersion: string;
   abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
-  constructor({ sdkKey, telemetryUrl, timeout, clientVersion }: TelemetryUploaderParams) {
+  constructor({ sdkKey, telemetryUrl, domain, timeout, clientVersion }: TelemetryUploaderParams) {
     this.sdkKey = sdkKey;
-    this.telemetryUrl = telemetryUrl || getDefaultTelemetryUrl();
+    this.telemetryUrl = telemetryUrl || getDefaultTelemetryUrl({ domain });
     this.timeout = timeout || DEFAULT_TIMEOUT;
     this.clientVersion = clientVersion;
   }

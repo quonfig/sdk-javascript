@@ -7,6 +7,11 @@ export type LoaderParams = {
   contexts: Contexts;
   /** Ordered list of API base URLs to try for failover. */
   apiUrls?: string[];
+  /**
+   * Active domain used to derive default apiUrls when `apiUrls` is omitted.
+   * See `InitOptions.domain` for resolution order.
+   */
+  domain?: string;
   timeout?: number;
   collectContextMode?: CollectContextMode;
   clientVersion?: string;
@@ -26,13 +31,14 @@ export default class Loader {
     sdkKey,
     contexts,
     apiUrls,
+    domain,
     timeout,
     collectContextMode = "PERIODIC_EXAMPLE",
     clientVersion = "",
   }: LoaderParams) {
     this.sdkKey = sdkKey;
     this.contexts = contexts;
-    this.apiUrls = (apiUrls ?? getDefaultApiUrls()).map((u) =>
+    this.apiUrls = (apiUrls ?? getDefaultApiUrls({ domain })).map((u) =>
       u.replace(/\/$/, "")
     );
     if (this.apiUrls.length === 0) {

@@ -25,23 +25,26 @@ export const DEFAULT_TIMEOUT = 10000;
  */
 export const DEFAULT_DOMAIN = "quonfig.com";
 
+export type DomainOptions = { domain?: string };
+
 /**
  * Resolve the active Quonfig domain.
  *
- * Order:
- *   1. `process.env.QUONFIG_DOMAIN` (Node side / build-time inlined by some bundlers)
- *   2. Hardcoded default `"quonfig.com"`
+ * Order (highest wins):
+ *   1. `options.domain` — the documented browser path (single knob that
+ *      flips api + telemetry URLs in lockstep, set via `init({ domain })`
+ *      or @quonfig/react `<QuonfigProvider domain=...>`)
+ *   2. `process.env.QUONFIG_DOMAIN` — useful Node-side / SSR / build-time
+ *      inlining; not reliably present at runtime in browsers
+ *   3. Hardcoded default `"quonfig.com"`
  *
- * This is guarded with `typeof process !== "undefined"` so a pure browser
- * runtime (where `process` does not exist) does not throw.
- *
- * Note: in a real browser, `process.env` is typically not available at
- * runtime — bundlers may inline `process.env.QUONFIG_DOMAIN` at build time
- * but at runtime this function falls through to the hardcoded default.
- * The intended override path for the browser is the explicit `apiUrls` /
- * `telemetryUrl` init options.
+ * The env-var read is guarded so a pure browser runtime (where `process`
+ * does not exist or is stubbed) does not throw.
  */
-export const getDomain = (): string => {
+export const getDomain = (options?: DomainOptions): string => {
+  if (options && typeof options.domain === "string" && options.domain.length > 0) {
+    return options.domain;
+  }
   try {
     if (
       typeof process !== "undefined" &&
@@ -61,18 +64,18 @@ export const getDomain = (): string => {
 };
 
 /**
- * Default ordered list of API base URLs to try, derived from `QUONFIG_DOMAIN`.
+ * Default ordered list of API base URLs, derived from the active domain.
  * Frontend SDK does NOT open SSE — only the eval-with-context HTTP endpoint
  * is hit, so we ship both primary and secondary as failover targets.
  */
-export const getDefaultApiUrls = (): string[] => {
-  const domain = getDomain();
+export const getDefaultApiUrls = (options?: DomainOptions): string[] => {
+  const domain = getDomain(options);
   return [`https://primary.${domain}`, `https://secondary.${domain}`];
 };
 
 /**
- * Default telemetry base URL, derived from `QUONFIG_DOMAIN`.
+ * Default telemetry base URL, derived from the active domain.
  */
-export const getDefaultTelemetryUrl = (): string => {
-  return `https://telemetry.${getDomain()}`;
+export const getDefaultTelemetryUrl = (options?: DomainOptions): string => {
+  return `https://telemetry.${getDomain(options)}`;
 };

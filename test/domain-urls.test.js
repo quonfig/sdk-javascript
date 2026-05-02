@@ -142,6 +142,48 @@ describe("QUONFIG_DOMAIN env var → default URLs", () => {
     expect(u.telemetryUrl).toBe("https://telemetry.quonfig.com");
   });
 
+  test("getDefaultApiUrls({ domain }) wins over QUONFIG_DOMAIN env var", () => {
+    process.env.QUONFIG_DOMAIN = "env-should-lose.example";
+    const { apiHelpers } = loadModules();
+    expect(apiHelpers.getDefaultApiUrls({ domain: "quonfig-staging.com" })).toEqual([
+      "https://primary.quonfig-staging.com",
+      "https://secondary.quonfig-staging.com",
+    ]);
+  });
+
+  test("getDefaultTelemetryUrl({ domain }) wins over QUONFIG_DOMAIN env var", () => {
+    process.env.QUONFIG_DOMAIN = "env-should-lose.example";
+    const { apiHelpers } = loadModules();
+    expect(apiHelpers.getDefaultTelemetryUrl({ domain: "quonfig-staging.com" })).toBe(
+      "https://telemetry.quonfig-staging.com",
+    );
+  });
+
+  test("Loader picks up domain option when apiUrls omitted", () => {
+    delete process.env.QUONFIG_DOMAIN;
+    const { Loader } = loadModules();
+    const loader = new Loader({
+      sdkKey: "test-key",
+      contexts: { user: { key: "alice" } },
+      domain: "quonfig-staging.com",
+    });
+    expect(loader.apiUrls).toEqual([
+      "https://primary.quonfig-staging.com",
+      "https://secondary.quonfig-staging.com",
+    ]);
+  });
+
+  test("TelemetryUploader picks up domain option when telemetryUrl omitted", () => {
+    delete process.env.QUONFIG_DOMAIN;
+    const { TelemetryUploader } = loadModules();
+    const u = new TelemetryUploader({
+      sdkKey: "test-key",
+      domain: "quonfig-staging.com",
+      clientVersion: "test",
+    });
+    expect(u.telemetryUrl).toBe("https://telemetry.quonfig-staging.com");
+  });
+
   test("env-var read is guarded: missing process global does not throw", () => {
     // Simulate a pure-browser environment where `process` does not exist.
     // We can't actually delete the Node `process` global without breaking
