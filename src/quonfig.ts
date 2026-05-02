@@ -44,6 +44,8 @@ export class Quonfig {
   private loggerAggregator: LoggerAggregator | undefined;
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
+  private _dataVersion = 0;
+  private _subscribers: Set<() => void> = new Set();
 
   // SDK identity reported in telemetry. Wrappers (e.g. @quonfig/react)
   // overwrite these on init so each wrapper SDK shows up distinctly in the
@@ -166,6 +168,40 @@ export class Quonfig {
   /** The init-time `loggerKey` used by the `shouldLog({loggerPath, ...})` overload. */
   get loggerKey(): string | undefined {
     return this._loggerKey;
+  }
+
+  /**
+   * Monotonic version counter that increments every time the in-memory config
+   * changes (via `setConfig` or `hydrate`). Pair with `subscribe()` and
+   * React's `useSyncExternalStore` to drive re-renders on poll updates.
+   */
+  get dataVersion(): number {
+    return this._dataVersion;
+  }
+
+  /**
+   * Register a listener invoked synchronously after every config mutation
+   * (poll fetch, `setConfig`, `hydrate`). Returns an unsubscribe function.
+   *
+   * Listeners must not throw — exceptions are swallowed so one bad subscriber
+   * cannot break the others.
+   */
+  subscribe(listener: () => void): () => void {
+    this._subscribers.add(listener);
+    return () => {
+      this._subscribers.delete(listener);
+    };
+  }
+
+  private notifySubscribers(): void {
+    this._dataVersion += 1;
+    this._subscribers.forEach((listener) => {
+      try {
+        listener();
+      } catch {
+        // swallow — see subscribe() docs
+      }
+    });
   }
 
   // -- Core Methods --
@@ -297,6 +333,7 @@ export class Quonfig {
   setConfig(rawValues: EvaluationPayload) {
     this._configs = Config.digest(rawValues);
     this.loaded = true;
+    this.notifySubscribers();
   }
 
   /**
@@ -319,6 +356,7 @@ export class Quonfig {
     });
     this._configs = configs;
     this.loaded = true;
+    this.notifySubscribers();
   }
 
   /**
