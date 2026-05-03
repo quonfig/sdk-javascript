@@ -114,6 +114,56 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
     await q.close();
   });
 
+  // qfg-5jcd: get() previously deferred record() via setTimeout(0). A tight
+  // sync loop of get() followed immediately by await close() would race past
+  // the records — close() flushed an empty aggregator and posted nothing.
+  // The fix records synchronously inside get() so records land before any
+  // await boundary in close().
+  test("close() POSTs records made during sync get() loop with no microtask yield (qfg-5jcd)", async () => {
+    const q = new Quonfig();
+    await q.init({
+      sdkKey: "qf_pk_development_test",
+      context: { user: { key: "alice" } },
+      collectEvaluationSummaries: true,
+      collectLoggerNames: false,
+      apiUrl: "https://primary.quonfig-staging.com",
+    });
+
+    // Seed a real config so get() finds it and records via the production
+    // setTimeout/record path (not the manual aggregator.data.set used in the
+    // qfg-q3cx tests above, which bypasses the race we want to catch).
+    q.setConfig({
+      evaluations: {
+        "test-flag": {
+          value: { type: "bool", value: true },
+          configId: "cfg-1",
+          configType: "CONFIG",
+          configRowIndex: 0,
+          conditionalValueIndex: 0,
+        },
+      },
+    });
+
+    const beforeCount = calls.filter((c) => c.url.includes("/api/v1/telemetry/")).length;
+
+    // Tight sync loop — no microtask yield between the get() calls and close().
+    for (let i = 0; i < 6; i++) {
+      q.get("test-flag");
+    }
+    await q.close();
+
+    const afterCount = calls.filter((c) => c.url.includes("/api/v1/telemetry/")).length;
+    expect(afterCount).toBe(beforeCount + 1);
+
+    const telemetryCall = calls
+      .filter((c) => c.url.includes("/api/v1/telemetry/"))
+      .pop();
+    const body = JSON.parse(telemetryCall.options.body);
+    const summary = body.events[0].summaries.summaries[0];
+    expect(summary.key).toBe("test-flag");
+    expect(summary.counters[0].count).toBe(6);
+  });
+
   test("close() with empty aggregator resolves without POSTing", async () => {
     const q = new Quonfig();
     await q.init({

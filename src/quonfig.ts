@@ -397,8 +397,14 @@ export class Quonfig {
 
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
       if (this._collectEvaluationSummaries) {
-        setTimeout(() => this.evaluationSummaryAggregator?.record(config));
+        // qfg-5jcd: record synchronously. record() is a Map.set + counter
+        // increment with no I/O; deferring it via setTimeout(0) caused a tight
+        // sync get()-loop followed by await close() to race past the records
+        // and ship empty telemetry. Matches sdk-node/src/quonfig.ts.
+        this.evaluationSummaryAggregator?.record(config);
       }
+      // afterEvaluationCallback is user-supplied — keep it deferred so a
+      // throwing or slow callback can't block the calling get().
       setTimeout(() => this.afterEvaluationCallback(key, value, this._contexts));
     }
 
@@ -515,7 +521,10 @@ export class Quonfig {
           args.desiredLevel.toUpperCase() as Severity
         );
       if (async) {
-        setTimeout(record);
+        // qfg-5jcd: queueMicrotask instead of setTimeout(0) so records land
+        // before any await boundary (e.g. await close()) downstream. Preserves
+        // the public `async` flag — record() still runs off the calling stack.
+        queueMicrotask(record);
       } else {
         record();
       }
