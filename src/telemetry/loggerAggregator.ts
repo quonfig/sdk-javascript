@@ -68,10 +68,7 @@ export class LoggerAggregator extends PeriodicSync<LoggerCounter> {
     }
   }
 
-  protected flush(
-    toShip: Map<string, LoggerCounter>,
-    startAtWas: Date
-  ): Promise<unknown> | void {
+  protected flush(toShip: Map<string, LoggerCounter>, startAtWas: Date): Promise<unknown> | void {
     const loggers: LoggersTelemetryEvent = {
       startAt: startAtWas.getTime(),
       endAt: new Date().getTime(),

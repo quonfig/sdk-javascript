@@ -303,10 +303,7 @@ export class Quonfig {
    * tearing down the SDK (e.g. before a context swap in a long-lived SPA).
    */
   async flush(): Promise<void> {
-    await Promise.all([
-      this.evaluationSummaryAggregator?.sync(),
-      this.loggerAggregator?.sync(),
-    ]);
+    await Promise.all([this.evaluationSummaryAggregator?.sync(), this.loggerAggregator?.sync()]);
   }
 
   /**
@@ -446,16 +443,22 @@ export class Quonfig {
    *    existing example-context telemetry. `loggerPath` is passed through
    *    without normalization.
    */
-  shouldLog(args: {
-    configKey: string;
-    desiredLevel: string;
-    defaultLevel: string;
-  }, async?: boolean): boolean;
-  shouldLog(args: {
-    loggerPath: string;
-    desiredLevel: string;
-    defaultLevel?: string;
-  }, async?: boolean): boolean;
+  shouldLog(
+    args: {
+      configKey: string;
+      desiredLevel: string;
+      defaultLevel: string;
+    },
+    async?: boolean
+  ): boolean;
+  shouldLog(
+    args: {
+      loggerPath: string;
+      desiredLevel: string;
+      defaultLevel?: string;
+    },
+    async?: boolean
+  ): boolean;
   shouldLog(
     args: {
       configKey?: string;
@@ -475,9 +478,7 @@ export class Quonfig {
 
     if (args.loggerPath !== undefined) {
       if (args.configKey !== undefined) {
-        throw new Error(
-          "[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both."
-        );
+        throw new Error("[quonfig] shouldLog: pass either `configKey` or `loggerPath`, not both.");
       }
       if (!this._loggerKey) {
         throw new Error(
@@ -509,17 +510,12 @@ export class Quonfig {
       resolvedConfigKey = args.configKey;
       telemetryName = args.configKey;
     } else {
-      throw new Error(
-        "[quonfig] shouldLog requires either `configKey` or `loggerPath`."
-      );
+      throw new Error("[quonfig] shouldLog requires either `configKey` or `loggerPath`.");
     }
 
     if (this._collectLoggerNames && isValidLogLevel(args.desiredLevel)) {
       const record = () =>
-        this.loggerAggregator?.record(
-          telemetryName,
-          args.desiredLevel.toUpperCase() as Severity
-        );
+        this.loggerAggregator?.record(telemetryName, args.desiredLevel.toUpperCase() as Severity);
       if (async) {
         // qfg-5jcd: queueMicrotask instead of setTimeout(0) so records land
         // before any await boundary (e.g. await close()) downstream. Preserves

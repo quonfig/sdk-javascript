@@ -4,8 +4,7 @@ import { base64Encode } from "./context";
  * Build the Authorization header for quonfig API requests.
  * Format: Basic base64("1:{sdkKey}")
  */
-export const authHeader = (sdkKey: string): string =>
-  `Basic ${base64Encode(`1:${sdkKey}`)}`;
+export const authHeader = (sdkKey: string): string => `Basic ${base64Encode(`1:${sdkKey}`)}`;
 
 /**
  * Build the standard headers for quonfig API requests.

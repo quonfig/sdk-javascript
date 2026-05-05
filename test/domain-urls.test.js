@@ -17,15 +17,9 @@ const path = require("path");
 // initialized. The defaults are computed lazily inside getDefault*() so a
 // straight require() reload still picks up env changes.
 function loadModules() {
-  const apiHelpersPath = require.resolve(
-    path.join(__dirname, "..", "dist", "apiHelpers")
-  );
-  const uploaderPath = require.resolve(
-    path.join(__dirname, "..", "dist", "telemetry", "uploader")
-  );
-  const loaderPath = require.resolve(
-    path.join(__dirname, "..", "dist", "loader")
-  );
+  const apiHelpersPath = require.resolve(path.join(__dirname, "..", "dist", "apiHelpers"));
+  const uploaderPath = require.resolve(path.join(__dirname, "..", "dist", "telemetry", "uploader"));
+  const loaderPath = require.resolve(path.join(__dirname, "..", "dist", "loader"));
   delete require.cache[apiHelpersPath];
   delete require.cache[uploaderPath];
   delete require.cache[loaderPath];
@@ -64,9 +58,7 @@ describe("QUONFIG_DOMAIN env var → default URLs", () => {
   test("with no env var set: telemetry default is prod telemetry url", () => {
     delete process.env.QUONFIG_DOMAIN;
     const { apiHelpers } = loadModules();
-    expect(apiHelpers.getDefaultTelemetryUrl()).toBe(
-      "https://telemetry.quonfig.com"
-    );
+    expect(apiHelpers.getDefaultTelemetryUrl()).toBe("https://telemetry.quonfig.com");
   });
 
   test("with QUONFIG_DOMAIN=quonfig-staging.com: api defaults follow", () => {
@@ -81,9 +73,7 @@ describe("QUONFIG_DOMAIN env var → default URLs", () => {
   test("with QUONFIG_DOMAIN=quonfig-staging.com: telemetry default follows", () => {
     process.env.QUONFIG_DOMAIN = "quonfig-staging.com";
     const { apiHelpers } = loadModules();
-    expect(apiHelpers.getDefaultTelemetryUrl()).toBe(
-      "https://telemetry.quonfig-staging.com"
-    );
+    expect(apiHelpers.getDefaultTelemetryUrl()).toBe("https://telemetry.quonfig-staging.com");
   });
 
   test("Loader picks up QUONFIG_DOMAIN-derived defaults when apiUrls option omitted", () => {
@@ -155,7 +145,7 @@ describe("QUONFIG_DOMAIN env var → default URLs", () => {
     process.env.QUONFIG_DOMAIN = "env-should-lose.example";
     const { apiHelpers } = loadModules();
     expect(apiHelpers.getDefaultTelemetryUrl({ domain: "quonfig-staging.com" })).toBe(
-      "https://telemetry.quonfig-staging.com",
+      "https://telemetry.quonfig-staging.com"
     );
   });
 
@@ -198,9 +188,7 @@ describe("QUONFIG_DOMAIN env var → default URLs", () => {
       // The compiled module reads process.env at module-load time AND at
       // call time of getDefault*(). Either path must guard.
       expect(() => {
-        const apiHelpersPath = require.resolve(
-          path.join(__dirname, "..", "dist", "apiHelpers")
-        );
+        const apiHelpersPath = require.resolve(path.join(__dirname, "..", "dist", "apiHelpers"));
         delete require.cache[apiHelpersPath];
         const apiHelpers = require(apiHelpersPath);
         apiHelpers.getDefaultApiUrls();

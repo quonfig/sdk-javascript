@@ -16,7 +16,7 @@ describe("init() apiUrl singular alias", () => {
       new Response(JSON.stringify({ evaluations: {} }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      }),
+      })
     );
   });
 

@@ -13,14 +13,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
+          node-version: "24"
+          cache: "npm"
 
       - name: Install
         run: npm ci
 
       - name: Build
         run: npm run build
+
+      - name: Run formatter
+        run: npm run prettier
 
       - name: Test
         run: npm test

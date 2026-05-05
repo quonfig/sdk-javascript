@@ -35,9 +35,7 @@ describe("Loader.url — collectContextMode query param", () => {
     const url = loader.url("https://api.example.com");
 
     // Split out the encoded-context path segment from query param.
-    const match = url.match(
-      /\/eval-with-context\/([^?]+)\?collectContextMode=(.+)$/
-    );
+    const match = url.match(/\/eval-with-context\/([^?]+)\?collectContextMode=(.+)$/);
     expect(match).not.toBeNull();
 
     const [, encodedContext, mode] = match;
@@ -49,10 +47,7 @@ describe("Loader.url — collectContextMode query param", () => {
 
     // Round-trip: base64-decode the path segment and confirm it's the original contexts JSON.
     // The SDK's encodeContexts wraps as { contexts: [...] }, base64 of JSON string.
-    const decoded = Buffer.from(
-      decodeURIComponent(encodedContext),
-      "base64"
-    ).toString("utf8");
+    const decoded = Buffer.from(decodeURIComponent(encodedContext), "base64").toString("utf8");
     const parsed = JSON.parse(decoded);
     expect(parsed).toBeDefined();
   });

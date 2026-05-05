@@ -1,7 +1,4 @@
-const {
-  Quonfig,
-  QUONFIG_SDK_LOGGING_CONTEXT_NAME,
-} = require("../dist");
+const { Quonfig, QUONFIG_SDK_LOGGING_CONTEXT_NAME } = require("../dist");
 
 // Helper: build a Quonfig instance, seed it with pre-evaluated log-level configs
 // via `hydrate`, and set `_loggerKey` + `_collectLoggerNames` directly — we skip
@@ -25,16 +22,10 @@ describe("shouldLog({loggerPath}) convenience", () => {
     });
 
     // debug is configured -> debug emits debug/info/warn/error/fatal.
-    expect(
-      q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "debug" })
-    ).toBe(true);
-    expect(
-      q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "info" })
-    ).toBe(true);
+    expect(q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "debug" })).toBe(true);
+    expect(q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "info" })).toBe(true);
     // trace is MORE verbose than debug -> should NOT emit.
-    expect(
-      q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "trace" })
-    ).toBe(false);
+    expect(q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "trace" })).toBe(false);
 
     // The loggerPath is published as-is (no snake_case, no dot-ification) under
     // the load-bearing "quonfig-sdk-logging" context name with nested `key`.
@@ -57,13 +48,9 @@ describe("shouldLog({loggerPath}) convenience", () => {
     });
 
     // error is configured -> info is MORE verbose, should not emit.
-    expect(
-      q.shouldLog({ loggerPath: "svc.billing", desiredLevel: "info" })
-    ).toBe(false);
+    expect(q.shouldLog({ loggerPath: "svc.billing", desiredLevel: "info" })).toBe(false);
     // error -> error itself emits.
-    expect(
-      q.shouldLog({ loggerPath: "svc.billing", desiredLevel: "error" })
-    ).toBe(true);
+    expect(q.shouldLog({ loggerPath: "svc.billing", desiredLevel: "error" })).toBe(true);
   });
 
   test("falls back to defaultLevel when the loggerKey has no value", () => {
@@ -97,12 +84,8 @@ describe("shouldLog({loggerPath}) convenience", () => {
     });
 
     // Implicit defaultLevel=WARN -> warn emits, info does not.
-    expect(
-      q.shouldLog({ loggerPath: "my.logger", desiredLevel: "warn" })
-    ).toBe(true);
-    expect(
-      q.shouldLog({ loggerPath: "my.logger", desiredLevel: "info" })
-    ).toBe(false);
+    expect(q.shouldLog({ loggerPath: "my.logger", desiredLevel: "warn" })).toBe(true);
+    expect(q.shouldLog({ loggerPath: "my.logger", desiredLevel: "info" })).toBe(false);
   });
 
   test("throws when loggerPath is passed but loggerKey was not set at init", () => {
@@ -111,9 +94,7 @@ describe("shouldLog({loggerPath}) convenience", () => {
       hydratedFlags: { "log-level.something": "INFO" },
     });
 
-    expect(() =>
-      q.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })
-    ).toThrow(/loggerKey/);
+    expect(() => q.shouldLog({ loggerPath: "foo.bar", desiredLevel: "info" })).toThrow(/loggerKey/);
   });
 
   test("throws when both configKey and loggerPath are passed", () => {

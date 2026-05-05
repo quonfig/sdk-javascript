@@ -38,9 +38,7 @@ export default class Loader {
   }: LoaderParams) {
     this.sdkKey = sdkKey;
     this.contexts = contexts;
-    this.apiUrls = (apiUrls ?? getDefaultApiUrls({ domain })).map((u) =>
-      u.replace(/\/$/, "")
-    );
+    this.apiUrls = (apiUrls ?? getDefaultApiUrls({ domain })).map((u) => u.replace(/\/$/, ""));
     if (this.apiUrls.length === 0) {
       throw new Error("apiUrls must not be empty");
     }
@@ -67,9 +65,9 @@ export default class Loader {
   /**
    * Try each API URL in order. Return the first successful result.
    */
-  private async loadWithFailover(
-    options: { headers: Record<string, string> }
-  ): Promise<EvaluationPayload> {
+  private async loadWithFailover(options: {
+    headers: Record<string, string>;
+  }): Promise<EvaluationPayload> {
     let lastError: any;
 
     for (const apiUrl of this.apiUrls) {

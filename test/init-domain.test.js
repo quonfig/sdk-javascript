@@ -19,7 +19,7 @@ describe("init() domain option", () => {
       new Response(JSON.stringify({ evaluations: {} }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      }),
+      })
     );
   });
 
@@ -46,9 +46,7 @@ describe("init() domain option", () => {
       "https://primary.quonfig-staging.com",
       "https://secondary.quonfig-staging.com",
     ]);
-    expect(q._telemetryUploader.telemetryUrl).toBe(
-      "https://telemetry.quonfig-staging.com",
-    );
+    expect(q._telemetryUploader.telemetryUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   test("domain wins over process.env.QUONFIG_DOMAIN", async () => {
@@ -66,9 +64,7 @@ describe("init() domain option", () => {
       "https://primary.quonfig-staging.com",
       "https://secondary.quonfig-staging.com",
     ]);
-    expect(q._telemetryUploader.telemetryUrl).toBe(
-      "https://telemetry.quonfig-staging.com",
-    );
+    expect(q._telemetryUploader.telemetryUrl).toBe("https://telemetry.quonfig-staging.com");
   });
 
   test("explicit apiUrls + telemetryUrl override domain", async () => {
@@ -84,9 +80,7 @@ describe("init() domain option", () => {
     });
 
     expect(q.loader.apiUrls).toEqual(["https://api.example.com"]);
-    expect(q._telemetryUploader.telemetryUrl).toBe(
-      "https://telemetry.example.com",
-    );
+    expect(q._telemetryUploader.telemetryUrl).toBe("https://telemetry.example.com");
   });
 
   test("localhost domain still derives subdomains (no special-casing)", async () => {
@@ -103,8 +97,6 @@ describe("init() domain option", () => {
       "https://primary.quonfig.localhost",
       "https://secondary.quonfig.localhost",
     ]);
-    expect(q._telemetryUploader.telemetryUrl).toBe(
-      "https://telemetry.quonfig.localhost",
-    );
+    expect(q._telemetryUploader.telemetryUrl).toBe("https://telemetry.quonfig.localhost");
   });
 });

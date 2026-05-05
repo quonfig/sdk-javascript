@@ -19,14 +19,14 @@ function makeFetchMock() {
         new Response(JSON.stringify({}), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        }),
+        })
       );
     }
     return Promise.resolve(
       new Response(JSON.stringify({ evaluations: {} }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
-      }),
+      })
     );
   });
   return { fetchMock, calls };
@@ -155,9 +155,7 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
     const afterCount = calls.filter((c) => c.url.includes("/api/v1/telemetry/")).length;
     expect(afterCount).toBe(beforeCount + 1);
 
-    const telemetryCall = calls
-      .filter((c) => c.url.includes("/api/v1/telemetry/"))
-      .pop();
+    const telemetryCall = calls.filter((c) => c.url.includes("/api/v1/telemetry/")).pop();
     const body = JSON.parse(telemetryCall.options.body);
     const summary = body.events[0].summaries.summaries[0];
     expect(summary.key).toBe("test-flag");

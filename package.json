@@ -23,7 +23,10 @@
     "bundle": "esbuild --minify --target=esnext --bundle --outfile=dist/quonfig.bundle.js --global-name=window.quonfigNamespace dist/index.js && echo 'window.quonfig = window.quonfigNamespace.quonfig' >> dist/quonfig.bundle.js",
     "lint": "eslint --ext .ts,.tsx src/",
     "test": "npm run build && jest --verbose --detectOpenHandles dist/ test/",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prettier": "prettier . -l",
+    "prettier:fix": "prettier --write .",
+    "version": "prettier --write CHANGELOG.md README.md && git add CHANGELOG.md README.md"
   },
   "repository": {
     "type": "git",
@@ -49,6 +52,7 @@
     "@types/uuid": "^9.0.5",
     "esbuild": "^0.19.0",
     "jest": "^29.7.0",
+    "prettier": "^3.0.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.3.0"
   }

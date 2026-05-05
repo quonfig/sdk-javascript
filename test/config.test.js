@@ -61,17 +61,30 @@ describe("Config.digest — json valueType", () => {
       },
     };
 
-    expect(() => Config.digest(payload)).toThrow(
-      /json value must be a native JSON type/
-    );
+    expect(() => Config.digest(payload)).toThrow(/json value must be a native JSON type/);
   });
 
   test("returns native scalar json values (number, bool, null)", () => {
     const payload = {
       evaluations: {
-        "n": { value: { type: "json", value: 7 }, configId: "a", configType: "CONFIG", valueType: "json" },
-        "b": { value: { type: "json", value: true }, configId: "b", configType: "CONFIG", valueType: "json" },
-        "z": { value: { type: "json", value: null }, configId: "c", configType: "CONFIG", valueType: "json" },
+        n: {
+          value: { type: "json", value: 7 },
+          configId: "a",
+          configType: "CONFIG",
+          valueType: "json",
+        },
+        b: {
+          value: { type: "json", value: true },
+          configId: "b",
+          configType: "CONFIG",
+          valueType: "json",
+        },
+        z: {
+          value: { type: "json", value: null },
+          configId: "c",
+          configType: "CONFIG",
+          valueType: "json",
+        },
       },
     };
 
