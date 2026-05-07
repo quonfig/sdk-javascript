@@ -17,6 +17,9 @@
   ],
   "author": "Quonfig",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "prebuild": "node scripts/generate-version.mjs",
     "build": "rm -rf dist/ && tsc",
