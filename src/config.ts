@@ -128,6 +128,11 @@ export class Config {
         configType: evaluation.configType || "config",
         configId: evaluation.configId || "",
       };
+      if (evaluation.reason !== undefined) metadata.reason = evaluation.reason;
+      if (evaluation.ruleIndex !== undefined) metadata.ruleIndex = evaluation.ruleIndex;
+      if (evaluation.weightedValueIndex !== undefined) {
+        metadata.weightedValueIndex = evaluation.weightedValueIndex;
+      }
 
       configs[key] = new Config(key, parsedValue, ev.type, ev, metadata);
     });

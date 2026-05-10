@@ -15,10 +15,63 @@ import type {
   Contexts,
   Duration,
   EvaluationCallback,
+  EvaluationDetails,
   EvaluationPayload,
+  EvaluationReason,
   InitOptions,
 } from "./types";
 import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
+
+/**
+ * Build the OpenFeature `variant` string per the cross-SDK spec
+ * (project/plans/openfeature-resolution-details.md §2).
+ */
+const buildVariant = (
+  reason: EvaluationReason,
+  ruleIndex: number | undefined,
+  weightedValueIndex: number | undefined
+): string => {
+  switch (reason) {
+    case "STATIC":
+      return "static";
+    case "TARGETING_MATCH":
+      return ruleIndex !== undefined ? `targeting:${ruleIndex}` : "targeting:0";
+    case "SPLIT":
+      return weightedValueIndex !== undefined ? `split:${weightedValueIndex}` : "split:0";
+    case "DEFAULT":
+    case "ERROR":
+    default:
+      return "default";
+  }
+};
+
+/**
+ * Build the OpenFeature `flagMetadata` map per the cross-SDK spec
+ * (project/plans/openfeature-resolution-details.md §3) using node/go/java
+ * camelCase keys and SHOUTY_SNAKE configType values.
+ */
+const buildFlagMetadata = (
+  configId: string | undefined,
+  configType: string | undefined,
+  ruleIndex: number | undefined,
+  weightedValueIndex: number | undefined,
+  reason: EvaluationReason
+): Record<string, unknown> => {
+  const md: Record<string, unknown> = {};
+  if (configId !== undefined && configId !== "") md.configId = configId;
+  if (configType !== undefined) md.configType = configType.toUpperCase();
+  if (
+    ruleIndex !== undefined &&
+    ruleIndex >= 0 &&
+    (reason === "TARGETING_MATCH" || reason === "SPLIT")
+  ) {
+    md.ruleIndex = ruleIndex;
+  }
+  if (weightedValueIndex !== undefined && reason === "SPLIT") {
+    md.weightedValueIndex = weightedValueIndex;
+  }
+  return md;
+};
 
 type PollStatus =
   | { status: "not-started" }
@@ -406,6 +459,66 @@ export class Quonfig {
     }
 
     return value;
+  }
+
+  /**
+   * Return the evaluated value plus OpenFeature-style resolution details
+   * (reason, variant, flagMetadata) for the given key.
+   *
+   * Mirrors sdk-node's `getBoolDetails` / `getStringDetails` etc. so the
+   * openfeature-web provider can populate `variant` and `flagMetadata` per
+   * `project/plans/openfeature-resolution-details.md`.
+   */
+  getDetails<T = ConfigValue>(key: string): EvaluationDetails<T> {
+    if (!this.loaded) {
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "GENERAL",
+        errorMessage: "Quonfig client has not finished loading",
+        variant: "default",
+        flagMetadata: {},
+      };
+    }
+
+    const config = this.configs[key];
+    if (!config) {
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "FLAG_NOT_FOUND",
+        errorMessage: `No config found for key "${key}"`,
+        variant: "default",
+        flagMetadata: {},
+      };
+    }
+
+    const md = config.configEvaluationMetadata;
+    // Older api-delivery deployments don't emit `reason` on the wire; treat
+    // their absence as STATIC so consumers see a sensible variant string.
+    const reason: EvaluationReason = md?.reason ?? "STATIC";
+    const ruleIndex = md?.ruleIndex;
+    const weightedValueIndex = md?.weightedValueIndex;
+
+    if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
+      if (this._collectEvaluationSummaries) {
+        this.evaluationSummaryAggregator?.record(config);
+      }
+      setTimeout(() => this.afterEvaluationCallback(key, config.value, this._contexts));
+    }
+
+    return {
+      value: config.value as unknown as T,
+      reason,
+      variant: buildVariant(reason, ruleIndex, weightedValueIndex),
+      flagMetadata: buildFlagMetadata(
+        md?.configId,
+        md?.configType,
+        ruleIndex,
+        weightedValueIndex,
+        reason
+      ),
+    };
   }
 
   /**

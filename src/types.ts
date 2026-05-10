@@ -33,12 +33,20 @@ export type ConfigValue = number | string | boolean | object | Duration | string
 
 /**
  * Metadata returned alongside each evaluated config value.
+ *
+ * `reason`, `ruleIndex`, and `weightedValueIndex` are populated when the
+ * server returns them on the wire (added per the cross-SDK
+ * `openfeature-resolution-details` spec). Older api-delivery deployments
+ * omit these fields, in which case the SDK falls back to a STATIC reason.
  */
 export type ConfigEvaluationMetadata = {
   configRowIndex: number;
   conditionalValueIndex: number;
   configType: string;
   configId: string;
+  reason?: EvaluationReason;
+  ruleIndex?: number;
+  weightedValueIndex?: number;
 };
 
 /**
@@ -59,6 +67,38 @@ export type Evaluation = {
   valueType: string;
   configRowIndex?: number;
   conditionalValueIndex?: number;
+  /**
+   * Cross-SDK OpenFeature resolution-details fields. Populated by
+   * api-delivery when it has run the rule evaluator. Older builds omit
+   * these — the SDK treats their absence as a STATIC evaluation.
+   */
+  reason?: EvaluationReason;
+  ruleIndex?: number;
+  weightedValueIndex?: number;
+};
+
+/** OpenFeature-compatible reason returned by `getDetails`. */
+export type EvaluationReason = "STATIC" | "TARGETING_MATCH" | "SPLIT" | "DEFAULT" | "ERROR";
+
+/** Error code attached to `getDetails` results when `reason === "ERROR"`. */
+export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";
+
+/**
+ * Result of `Quonfig.getDetails(key)`. Mirrors sdk-node's `EvaluationDetails`
+ * so OpenFeature providers (openfeature-web) can surface variant + flagMetadata
+ * per project/plans/openfeature-resolution-details.md.
+ *
+ * `variant` is always set ("static" | "targeting:<n>" | "split:<n>" | "default").
+ * `flagMetadata` is always set; absent keys (e.g. `weightedValueIndex` on a
+ * non-split) are omitted rather than nulled.
+ */
+export type EvaluationDetails<T = ConfigValue> = {
+  value: T | undefined;
+  reason: EvaluationReason;
+  errorCode?: EvaluationErrorCode;
+  errorMessage?: string;
+  variant: string;
+  flagMetadata: Record<string, unknown>;
 };
 
 /**
