@@ -1,14 +1,13 @@
 const { Quonfig, QUONFIG_SDK_LOGGING_CONTEXT_NAME } = require("../dist");
 
 // Helper: build a Quonfig instance, seed it with pre-evaluated log-level configs
-// via `hydrate`, and set `_loggerKey` + `_collectLoggerNames` directly — we skip
-// `init()` here so the test does not need a live server. This mirrors what the
-// bootstrap path does in production.
-function buildClient({ hydratedFlags, loggerKey, collectLoggerNames = false }) {
+// via `hydrate`, and set `_loggerKey` directly — we skip `init()` here so the
+// test does not need a live server. This mirrors what the bootstrap path does
+// in production.
+function buildClient({ hydratedFlags, loggerKey }) {
   const q = new Quonfig();
   // Directly populate the internal state that `init` would otherwise set up.
   q._loggerKey = loggerKey;
-  q._collectLoggerNames = collectLoggerNames;
   q._contexts = {};
   q.hydrate(hydratedFlags);
   return q;

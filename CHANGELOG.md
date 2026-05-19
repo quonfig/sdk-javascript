@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.17 - 2026-05-19
+
+- **Breaking (typing-level):** removed the `collectLoggerNames` init option and its internal
+  `LoggerAggregator`. The server-side telemetry pipeline never consumed the logger-name event (no
+  schema entry, no flatten branch, no ClickHouse table), so this was dead client-side cost.
+  TypeScript callers passing `collectLoggerNames: true | false` will get a type error — drop the
+  field (qfg-o2fk). Logger-level evaluation via `shouldLog({loggerPath, ...})` is unchanged; logger
+  paths still flow to the dashboard through the existing example-context telemetry.
+
 ## 0.0.16 - 2026-05-10
 
 - Added `getDetails<T>` accessor that returns the resolved value alongside the evaluation `reason`,

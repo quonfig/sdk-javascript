@@ -164,7 +164,6 @@ export type InitOptions = {
   timeout?: number;
   afterEvaluationCallback?: EvaluationCallback;
   collectEvaluationSummaries?: boolean;
-  collectLoggerNames?: boolean;
   collectContextMode?: CollectContextMode;
   /**
    * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.

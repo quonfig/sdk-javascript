@@ -53,7 +53,6 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: true,
-      collectLoggerNames: false,
       apiUrl: "https://primary.quonfig-staging.com",
     });
 
@@ -84,7 +83,6 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: true,
-      collectLoggerNames: false,
       apiUrl: "https://primary.quonfig-staging.com",
     });
 
@@ -125,7 +123,6 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: true,
-      collectLoggerNames: false,
       apiUrl: "https://primary.quonfig-staging.com",
     });
 
@@ -168,7 +165,6 @@ describe("close()/flush() drain telemetry (qfg-q3cx)", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: true,
-      collectLoggerNames: false,
       apiUrl: "https://primary.quonfig-staging.com",
     });
 

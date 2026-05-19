@@ -38,7 +38,6 @@ describe("init() domain option", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       domain: "quonfig-staging.com",
     });
 
@@ -56,7 +55,6 @@ describe("init() domain option", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       domain: "quonfig-staging.com",
     });
 
@@ -73,7 +71,6 @@ describe("init() domain option", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       domain: "quonfig-staging.com",
       apiUrls: ["https://api.example.com"],
       telemetryUrl: "https://telemetry.example.com",
@@ -89,7 +86,6 @@ describe("init() domain option", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       domain: "quonfig.localhost",
     });
 

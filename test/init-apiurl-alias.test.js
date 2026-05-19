@@ -30,7 +30,6 @@ describe("init() apiUrl singular alias", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       apiUrl: "https://primary.quonfig-staging.com",
     });
 
@@ -43,7 +42,6 @@ describe("init() apiUrl singular alias", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
       apiUrls: ["https://primary.quonfig-staging.com"],
       apiUrl: "https://should-be-ignored.example.com",
     });
@@ -57,7 +55,6 @@ describe("init() apiUrl singular alias", () => {
       sdkKey: "qf_pk_development_test",
       context: { user: { key: "alice" } },
       collectEvaluationSummaries: false,
-      collectLoggerNames: false,
     });
 
     expect(q.loader.apiUrls).toEqual([

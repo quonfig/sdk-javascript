@@ -4,11 +4,10 @@ import { Config } from "./config";
 import { contextsEqual, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader from "./loader";
-import { isValidLogLevel, shouldLog, type Severity } from "./logger";
+import { shouldLog } from "./logger";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
 import TelemetryUploader from "./telemetry/uploader";
-import { LoggerAggregator } from "./telemetry/loggerAggregator";
 import version from "./version";
 import type {
   ConfigValue,
@@ -92,9 +91,7 @@ export class Quonfig {
   private _pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
   private _instanceHash: string = uuid();
   private _collectEvaluationSummaries = true;
-  private _collectLoggerNames = false;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
-  private loggerAggregator: LoggerAggregator | undefined;
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
   private _dataVersion = 0;
@@ -123,7 +120,6 @@ export class Quonfig {
     timeout,
     afterEvaluationCallback = () => {},
     collectEvaluationSummaries = true,
-    collectLoggerNames = false,
     collectContextMode = "PERIODIC_EXAMPLE",
     loggerKey,
   }: InitOptions): Promise<void> {
@@ -166,20 +162,14 @@ export class Quonfig {
       this.evaluationSummaryAggregator = new EvaluationSummaryAggregator(this, 100000);
     }
 
-    this._collectLoggerNames = collectLoggerNames;
-    if (collectLoggerNames) {
-      this.loggerAggregator = new LoggerAggregator(this, 100000);
-    }
-
     // Flush telemetry on page unload (browser only)
     if (
-      (collectEvaluationSummaries || collectLoggerNames) &&
+      collectEvaluationSummaries &&
       typeof window !== "undefined" &&
       typeof window.addEventListener === "function"
     ) {
       window.addEventListener("beforeunload", () => {
         this.evaluationSummaryAggregator?.sync();
-        this.loggerAggregator?.sync();
       });
     }
 
@@ -356,7 +346,7 @@ export class Quonfig {
    * tearing down the SDK (e.g. before a context swap in a long-lived SPA).
    */
   async flush(): Promise<void> {
-    await Promise.all([this.evaluationSummaryAggregator?.sync(), this.loggerAggregator?.sync()]);
+    await this.evaluationSummaryAggregator?.sync();
   }
 
   /**
@@ -374,7 +364,6 @@ export class Quonfig {
    */
   stopTelemetry(): void {
     this.evaluationSummaryAggregator?.stop();
-    this.loggerAggregator?.stop();
   }
 
   /**
@@ -556,38 +545,17 @@ export class Quonfig {
    *    existing example-context telemetry. `loggerPath` is passed through
    *    without normalization.
    */
-  shouldLog(
-    args: {
-      configKey: string;
-      desiredLevel: string;
-      defaultLevel: string;
-    },
-    async?: boolean
-  ): boolean;
-  shouldLog(
-    args: {
-      loggerPath: string;
-      desiredLevel: string;
-      defaultLevel?: string;
-    },
-    async?: boolean
-  ): boolean;
-  shouldLog(
-    args: {
-      configKey?: string;
-      loggerPath?: string;
-      desiredLevel: string;
-      defaultLevel?: string;
-    },
-    async: boolean = true
-  ): boolean {
+  shouldLog(args: { configKey: string; desiredLevel: string; defaultLevel: string }): boolean;
+  shouldLog(args: { loggerPath: string; desiredLevel: string; defaultLevel?: string }): boolean;
+  shouldLog(args: {
+    configKey?: string;
+    loggerPath?: string;
+    desiredLevel: string;
+    defaultLevel?: string;
+  }): boolean {
     let resolvedConfigKey: string;
     // Default fallback matches sdk-node (WARN).
     let resolvedDefaultLevel = args.defaultLevel ?? "WARN";
-    // The name recorded in logger-name telemetry: for the loggerPath form we
-    // prefer the logger path itself (the thing the user cares about), for the
-    // configKey form we keep the old behavior of recording the config key.
-    let telemetryName: string;
 
     if (args.loggerPath !== undefined) {
       if (args.configKey !== undefined) {
@@ -600,7 +568,6 @@ export class Quonfig {
         );
       }
       resolvedConfigKey = this._loggerKey;
-      telemetryName = args.loggerPath;
 
       // Publish the logger path under the `quonfig-sdk-logging` context name
       // using a `key` property. This matches the sdk-node/sdk-go/sdk-ruby
@@ -621,22 +588,8 @@ export class Quonfig {
       }
     } else if (args.configKey !== undefined) {
       resolvedConfigKey = args.configKey;
-      telemetryName = args.configKey;
     } else {
       throw new Error("[quonfig] shouldLog requires either `configKey` or `loggerPath`.");
-    }
-
-    if (this._collectLoggerNames && isValidLogLevel(args.desiredLevel)) {
-      const record = () =>
-        this.loggerAggregator?.record(telemetryName, args.desiredLevel.toUpperCase() as Severity);
-      if (async) {
-        // qfg-5jcd: queueMicrotask instead of setTimeout(0) so records land
-        // before any await boundary (e.g. await close()) downstream. Preserves
-        // the public `async` flag — record() still runs off the calling stack.
-        queueMicrotask(record);
-      } else {
-        record();
-      }
     }
 
     return shouldLog({
@@ -652,13 +605,6 @@ export class Quonfig {
    */
   isCollectingEvaluationSummaries(): boolean {
     return this._collectEvaluationSummaries;
-  }
-
-  /**
-   * Whether logger name telemetry is being collected.
-   */
-  isCollectingLoggerNames(): boolean {
-    return this._collectLoggerNames;
   }
 }
 

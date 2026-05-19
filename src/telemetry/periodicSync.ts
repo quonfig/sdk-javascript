@@ -62,14 +62,11 @@ export abstract class PeriodicSync<T> {
     const configKey = `log-level.${loggerName}`;
 
     if (
-      this.client.shouldLog(
-        {
-          configKey,
-          desiredLevel: "debug",
-          defaultLevel: "error",
-        },
-        false
-      )
+      this.client.shouldLog({
+        configKey,
+        desiredLevel: "debug",
+        defaultLevel: "error",
+      })
     ) {
       console.log(`${loggerName}: ${message}`);
     }
