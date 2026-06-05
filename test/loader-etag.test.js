@@ -77,13 +77,40 @@ describe("Loader ETag / 304 fast-path", () => {
     ]);
 
     const loader = new Loader({ ...baseParams });
-    await loader.load();
+    const first = await loader.load();
     const second = await loader.load();
 
     expect(second.notModified).toBe(true);
-    expect(second.payload).toBeUndefined();
+    // A 304 carries the payload cached from this context's prior 200 — never
+    // undefined — so the caller can always populate the correct context.
+    expect(second.payload).toEqual(first.payload);
+    expect(second.payload.evaluations.flagA).toBeDefined();
     // The second request revalidated with the ETag from the first 200.
     expect(global.fetch.calls[1].headers["If-None-Match"]).toBe(ETAG_A);
+  });
+
+  test("a 304 returns THIS context's cached payload, not whatever was fetched last", async () => {
+    // Reproduces the updateContext() stale bug: with a single shared config slot
+    // in the SDK, a 304 for context A while B was the most recent fetch must
+    // still hand back A's evaluations.
+    originalFetch = global.fetch;
+    global.fetch = scriptedFetch([
+      ok({ evaluations: { feature: { value: { type: "bool", value: true } } } }, ETAG_A), // A
+      ok({ evaluations: { feature: { value: { type: "bool", value: false } } } }, ETAG_B), // B
+      notModified(), // A again -> 304
+    ]);
+
+    const loader = new Loader({ ...baseParams });
+    await loader.load(); // context A (alice)
+    loader.contexts = { user: { key: "bob" } };
+    await loader.load(); // context B (bob)
+    loader.contexts = { user: { key: "alice" } };
+    const back = await loader.load(); // A again -> 304
+
+    expect(back.notModified).toBe(true);
+    // Must be A's value (true), NOT the most-recently-fetched B (false).
+    expect(back.payload.evaluations.feature.value.value).toBe(true);
+    expect(global.fetch.calls[2].headers["If-None-Match"]).toBe(ETAG_A);
   });
 
   test("a fresh 200 after a 304 swaps in the new payload and rotates the ETag", async () => {
@@ -224,5 +251,32 @@ describe("Quonfig — 304 retains the previously evaluated config (anti-stale)",
 
     await q.updateContext({ user: { key: "alice" } });
     expect(q.get("feature")).toBe(false); // fresh 200 applied
+  });
+
+  test("updateContext to a 304 context reflects THAT context, not the previous one", async () => {
+    // The prod stale bug: switch A -> B -> A; the return to A is a 304, and the
+    // SDK must show A's value, not B's (whatever was fetched most recently).
+    originalFetch = global.fetch;
+    global.fetch = scriptedFetch([
+      ok({ evaluations: { feature: { value: { type: "bool", value: true } } } }, ETAG_A), // init A
+      ok({ evaluations: { feature: { value: { type: "bool", value: false } } } }, ETAG_B), // -> B
+      notModified(), // back to A -> 304
+    ]);
+
+    const q = new Quonfig();
+    await q.init({
+      sdkKey: "qf_pk_development_test",
+      context: { user: { key: "alice" } },
+      apiUrls: ["https://primary.quonfig-staging.com"],
+      collectEvaluationSummaries: false,
+    });
+    expect(q.get("feature")).toBe(true); // A
+
+    await q.updateContext({ user: { key: "bob" } });
+    expect(q.get("feature")).toBe(false); // B
+
+    await q.updateContext({ user: { key: "alice" } });
+    // 304 for A — must restore A's value (true), NOT leave B's stale false.
+    expect(q.get("feature")).toBe(true);
   });
 });

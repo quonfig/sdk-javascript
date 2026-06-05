@@ -1,7 +1,7 @@
 import { v4 as uuid } from "uuid";
 
 import { Config } from "./config";
-import { contextsEqual, validateContexts } from "./context";
+import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader from "./loader";
 import { shouldLog } from "./logger";
@@ -94,6 +94,12 @@ export class Quonfig {
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
+  // Encoded signature of the context whose evaluations currently populate
+  // `_configs`. Used to decide whether a 304 can be safely no-op'd: a 304 only
+  // means "unchanged" for its own context, so if `_configs` holds a different
+  // context (after `updateContext()`), we must still apply the 304's cached
+  // payload rather than leave stale wrong-context values.
+  private _loadedContextSig: string | undefined;
   private _dataVersion = 0;
   private _subscribers: Set<() => void> = new Set();
 
@@ -263,21 +269,25 @@ export class Quonfig {
 
       if (contextsEqual(this._contexts, bootstrap.context)) {
         this.setConfig({ evaluations: bootstrap.evaluations });
+        this._loadedContextSig = encodeContexts(this._contexts);
         return;
       }
     }
 
     // Ensure loader has the freshest context
     this.loader.contexts = this._contexts;
+    const sig = encodeContexts(this._contexts);
 
     return this.loader
       .load()
       .then((result) => {
-        // On a 304 the server confirms our cached evaluations are still valid
-        // for this exact context+version — keep them untouched. Only a fresh
-        // 200 carries a payload to swap in.
-        if (!result.notModified) {
+        // Apply the payload unless `_configs` already holds THIS context's data
+        // and the server said it's unchanged (304). On a 304 after a context
+        // switch, `_configs` holds a different context — skipping would serve
+        // stale wrong-context values — so we apply the 304's cached payload.
+        if (!result.notModified || this._loadedContextSig !== sig) {
           this.setConfig(result.payload);
+          this._loadedContextSig = sig;
         }
       })
       .finally(() => {
@@ -316,12 +326,13 @@ export class Quonfig {
     this.stopPolling();
     this._pollStatus = { status: "pending" };
 
+    const sig = encodeContexts(this._contexts);
     return this.loader.load().then((result) => {
-      // First poll fetch. A 304 here would only happen if a prior load() (e.g.
-      // from init()) already populated the cache for this context; either way,
-      // only replace config on a fresh 200.
-      if (!result.notModified) {
+      // First poll fetch. Apply the payload unless `_configs` already reflects
+      // this exact context unchanged (see load() for the rationale).
+      if (!result.notModified || this._loadedContextSig !== sig) {
         this.setConfig(result.payload);
+        this._loadedContextSig = sig;
       }
       this.doPolling({ frequencyInMs });
     });
