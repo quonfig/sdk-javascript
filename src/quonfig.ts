@@ -272,8 +272,13 @@ export class Quonfig {
 
     return this.loader
       .load()
-      .then((payload: EvaluationPayload) => {
-        this.setConfig(payload);
+      .then((result) => {
+        // On a 304 the server confirms our cached evaluations are still valid
+        // for this exact context+version — keep them untouched. Only a fresh
+        // 200 carries a payload to swap in.
+        if (!result.notModified) {
+          this.setConfig(result.payload);
+        }
       })
       .finally(() => {
         if (this.pollStatus.status === "running") {
@@ -311,8 +316,13 @@ export class Quonfig {
     this.stopPolling();
     this._pollStatus = { status: "pending" };
 
-    return this.loader.load().then((payload) => {
-      this.setConfig(payload);
+    return this.loader.load().then((result) => {
+      // First poll fetch. A 304 here would only happen if a prior load() (e.g.
+      // from init()) already populated the cache for this context; either way,
+      // only replace config on a fresh 200.
+      if (!result.notModified) {
+        this.setConfig(result.payload);
+      }
       this.doPolling({ frequencyInMs });
     });
   }
