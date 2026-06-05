@@ -102,6 +102,13 @@ export class Quonfig {
   private _loadedContextSig: string | undefined;
   private _dataVersion = 0;
   private _subscribers: Set<() => void> = new Set();
+  // Bootstrap (globalThis._quonfigBootstrap) is a ONE-SHOT init seed: an SSR
+  // snapshot used to paint instantly on the first load() without a network
+  // round-trip. Once consumed, every later load() (the poll ticks) ignores it
+  // and fetches live — otherwise the stale SSR snapshot would be re-applied on
+  // every tick, permanently reverting fresh data to SSR-time values and making
+  // server-side flag flips invisible (qfg-xqxi).
+  private _bootstrapConsumed = false;
 
   // SDK identity reported in telemetry. Wrappers (e.g. @quonfig/react)
   // overwrite these on init so each wrapper SDK shows up distinctly in the
@@ -263,16 +270,24 @@ export class Quonfig {
       throw new Error("Quonfig not initialized. Call init() first.");
     }
 
-    // Check for bootstrap data
-    if (globalThis && (globalThis as any)._quonfigBootstrap) {
+    // Honor the bootstrap snapshot only on the FIRST load() (init's instant
+    // paint). After that it's marked consumed so polling always fetches live —
+    // see _bootstrapConsumed. A context that diverges from the snapshot falls
+    // through to a live fetch as before.
+    if (!this._bootstrapConsumed && globalThis && (globalThis as any)._quonfigBootstrap) {
       const bootstrap = (globalThis as any)._quonfigBootstrap as QuonfigBootstrap;
 
       if (contextsEqual(this._contexts, bootstrap.context)) {
         this.setConfig({ evaluations: bootstrap.evaluations });
         this._loadedContextSig = encodeContexts(this._contexts);
+        this._bootstrapConsumed = true;
         return;
       }
     }
+    // First load() resolved a value (from bootstrap above or the live fetch
+    // below) — bootstrap has served its init-time purpose and must not seed any
+    // later load().
+    this._bootstrapConsumed = true;
 
     // Ensure loader has the freshest context
     this.loader.contexts = this._contexts;
