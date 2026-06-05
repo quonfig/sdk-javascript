@@ -327,15 +327,26 @@ export class Quonfig {
     this._pollStatus = { status: "pending" };
 
     const sig = encodeContexts(this._contexts);
-    return this.loader.load().then((result) => {
-      // First poll fetch. Apply the payload unless `_configs` already reflects
-      // this exact context unchanged (see load() for the rationale).
-      if (!result.notModified || this._loadedContextSig !== sig) {
-        this.setConfig(result.payload);
-        this._loadedContextSig = sig;
-      }
-      this.doPolling({ frequencyInMs });
-    });
+    return this.loader
+      .load()
+      .then((result) => {
+        // First poll fetch. Apply the payload unless `_configs` already reflects
+        // this exact context unchanged (see load() for the rationale).
+        if (!result.notModified || this._loadedContextSig !== sig) {
+          this.setConfig(result.payload);
+          this._loadedContextSig = sig;
+        }
+      })
+      .finally(() => {
+        // Schedule the recurring loop REGARDLESS of the first fetch's outcome
+        // (qfg-8uw5). If the bootstrap fetch rejects — a startup network blip
+        // with both primary and secondary briefly unreachable — `.then` never
+        // runs, so scheduling here is the only thing that lets polling start and
+        // self-heal on the next tick. `doPolling`'s own loop is already resilient
+        // this way; the bootstrap must match it. (The legacy ReforgeHQ SDK
+        // scheduled here too; the Quonfig port regressed it into the `.then`.)
+        this.doPolling({ frequencyInMs });
+      });
   }
 
   private doPolling({ frequencyInMs }: { frequencyInMs: number }) {
