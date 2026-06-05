@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.18 - 2026-06-05
+
+- Conditional polling: the loader now sends `If-None-Match` on repeat eval-with-context polls and
+  honors a `304 Not Modified` by keeping the cached evaluations instead of re-downloading the full
+  payload. The ETag is stored per-request-URL (which embeds the encoded context) and LRU-bounded to
+  16 entries, so a context switch can never replay a stale ETag. Steady-state polling collapses to a
+  304 when neither the workspace version nor the context has changed (qfg-iikt).
+- Fix: a 304 now returns the payload cached for that exact context, so the `updateContext(A)` →
+  `updateContext(B)` → `updateContext(A)` pattern can no longer leave the previous context's
+  evaluations in the single shared config slot and serve the wrong context's values (qfg-iikt).
+- Fix: polling now starts and self-heals even when the very first poll fetch rejects (a startup
+  network blip with both primary and secondary briefly unreachable). Previously a rejected bootstrap
+  fetch left polling permanently dead — config frozen with no recovery after connectivity returned.
+  The recurring loop is now scheduled regardless of the first fetch's outcome, matching the
+  steady-state loop's own resilience (qfg-8uw5).
+
 ## 0.0.17 - 2026-05-19
 
 - **Breaking (typing-level):** removed the `collectLoggerNames` init option and its internal
