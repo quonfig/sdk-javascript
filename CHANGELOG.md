@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.0 - 2026-06-06
+
+- **Stable 1.0.0 release.** The Quonfig browser/JavaScript SDK is now declared stable. No API or
+  behavior changes from 0.0.18 — this is a coordinated 1.0.0 version stamp across the entire Quonfig
+  SDK family.
+
 ## 0.0.18 - 2026-06-05
 
 - Conditional polling: the loader now sends `If-None-Match` on repeat eval-with-context polls and
