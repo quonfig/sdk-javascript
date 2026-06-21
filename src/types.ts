@@ -109,6 +109,19 @@ export type EvaluationPayload = {
   meta?: {
     version?: string;
     environment?: string;
+    /**
+     * Monotonic per-branch commit counter (`git rev-list --count HEAD`) the
+     * backend stamps on every eval response (api-delivery eval_context.go).
+     * Unlike `version` — a commit SHA, which is unordered — a higher
+     * `generation` is strictly newer, so the reject-older install guard (spec
+     * 5f) can order two snapshots and refuse to regress an established client.
+     *
+     * Absent or <= 0 means "unversioned" — a server that predates the
+     * watermark, or the depth-1 secondary, which reports generation=1 for
+     * everything (the "always older" standby floor, spec 5f.1). The guard's
+     * carve-out installs an unversioned payload rather than freezing on it.
+     */
+    generation?: number;
   };
 };
 

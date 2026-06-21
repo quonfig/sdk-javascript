@@ -3,7 +3,7 @@ import { v4 as uuid } from "uuid";
 import { Config } from "./config";
 import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
-import Loader from "./loader";
+import Loader, { type LoaderResult } from "./loader";
 import { shouldLog } from "./logger";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
@@ -101,6 +101,14 @@ export class Quonfig {
   // payload rather than leave stale wrong-context values.
   private _loadedContextSig: string | undefined;
   private _dataVersion = 0;
+  // Reject-older install guard state (qfg-7h5d.2.1, spec 5f/5f.1).
+  // `_heldGeneration` is the monotonic Meta.generation of the payload currently
+  // in `_configs` (0 before the first install, or when the server is
+  // unversioned / the depth-1 secondary's gen=1 floor). `_configInstalls`
+  // counts installs over the client's lifetime so the guard can tell a fresh
+  // client (install anything) from an established one (reject-older).
+  private _heldGeneration = 0;
+  private _configInstalls = 0;
   private _subscribers: Set<() => void> = new Set();
   // Bootstrap (globalThis._quonfigBootstrap) is a ONE-SHOT init seed: an SSR
   // snapshot used to paint instantly on the first load() without a network
@@ -236,6 +244,17 @@ export class Quonfig {
   }
 
   /**
+   * Meta.generation of the config the client is currently holding (0 before the
+   * first install, or when the server predates the watermark / is the depth-1
+   * secondary's gen=1 floor). A higher generation is strictly newer; the
+   * reject-older guard compares against it on every network install path
+   * (qfg-7h5d.2.1, spec 5f).
+   */
+  get heldGeneration(): number {
+    return this._heldGeneration;
+  }
+
+  /**
    * Register a listener invoked synchronously after every config mutation
    * (poll fetch, `setConfig`, `hydrate`). Returns an unsubscribe function.
    *
@@ -296,20 +315,72 @@ export class Quonfig {
     return this.loader
       .load()
       .then((result) => {
-        // Apply the payload unless `_configs` already holds THIS context's data
-        // and the server said it's unchanged (304). On a 304 after a context
-        // switch, `_configs` holds a different context — skipping would serve
-        // stale wrong-context values — so we apply the 304's cached payload.
-        if (!result.notModified || this._loadedContextSig !== sig) {
-          this.setConfig(result.payload);
-          this._loadedContextSig = sig;
-        }
+        this.applyLoaderResult(result, sig);
       })
       .finally(() => {
         if (this.pollStatus.status === "running") {
           this._pollCount += 1;
         }
       });
+  }
+
+  /**
+   * Apply a loader result to the in-memory config, enforcing the reject-older
+   * install guard (qfg-7h5d.2.1, spec 5f). Shared by `load()` and `poll()` so
+   * the guard lives in exactly one place. `sig` is the encoded signature of the
+   * context that was requested.
+   *
+   * Two orthogonal conditions gate an install:
+   *   1. Did the server return data for us to apply? A 200 (or a 304 whose
+   *      cached payload is for a DIFFERENT context than `_configs` currently
+   *      holds, after an `updateContext`) does; a 304 for the already-held
+   *      context is a no-op.
+   *   2. Is the data new enough to install? A SAME-context refresh runs through
+   *      `shouldInstall` — the reject-older watermark check that stops a slow
+   *      primary or a failover to the stale (gen=1) secondary from regressing or
+   *      flapping an established client. A context SWITCH is a different query
+   *      whose generation is not comparable to the held one, so it always
+   *      installs (the "fresh for this context" case — a stale secondary may
+   *      seed it, bounded, exactly as the spec allows; the guard must never
+   *      strand `updateContext` on the held generation).
+   */
+  private applyLoaderResult(result: LoaderResult, sig: string): void {
+    const contextChanged = this._loadedContextSig !== sig;
+    if (!result.notModified || contextChanged) {
+      if (contextChanged || this.shouldInstall(result.payload)) {
+        this.setConfig(result.payload);
+        this._loadedContextSig = sig;
+      }
+    }
+  }
+
+  /**
+   * Canonical reject-older rule for a SAME-context network install (mirrors
+   * sdk-node/src/quonfig.ts:1251 `shouldInstall`). Reject-older is the whole
+   * rule — there is no source ranking (spec 5f point 2):
+   *
+   *   - A fresh client (nothing installed yet) accepts the first snapshot, even
+   *     an unversioned or stale-secondary one — it has nothing to regress.
+   *   - An incoming generation <= 0 (absent, or a server that predates the
+   *     watermark) carries no ordering information, so it cannot be rejected as
+   *     "older": install it (the carve-out). This is mandatory from day one so
+   *     the frontend never repeats the backend's 5-of-6 miss where established
+   *     clients froze against gen=0 servers (qfg-7h5d.1.18).
+   *   - Otherwise install iff the incoming generation strictly exceeds the held
+   *     one. Equal-or-lower is a no-op, so a late failover can't move an
+   *     established client backward, an equal second leg can't flap, and a later
+   *     newer leg heals forward.
+   *
+   * The depth-1 secondary's generation is a positive 1, so it is rejected by the
+   * strict-greater check (an established client holds a far higher primary
+   * generation, so `1 > held` is false — spec 5f.1), NOT by the carve-out. Only
+   * a truly unversioned (<= 0) payload takes the carve-out.
+   */
+  private shouldInstall(payload: EvaluationPayload): boolean {
+    if (this._configInstalls === 0) return true;
+    const incoming = payload?.meta?.generation ?? 0;
+    if (incoming <= 0) return true;
+    return incoming > this._heldGeneration;
   }
 
   /**
@@ -345,12 +416,9 @@ export class Quonfig {
     return this.loader
       .load()
       .then((result) => {
-        // First poll fetch. Apply the payload unless `_configs` already reflects
-        // this exact context unchanged (see load() for the rationale).
-        if (!result.notModified || this._loadedContextSig !== sig) {
-          this.setConfig(result.payload);
-          this._loadedContextSig = sig;
-        }
+        // First poll fetch. Same guarded install path as load() — see
+        // applyLoaderResult for the 304/context-switch and reject-older rules.
+        this.applyLoaderResult(result, sig);
       })
       .finally(() => {
         // Schedule the recurring loop REGARDLESS of the first fetch's outcome
@@ -414,10 +482,18 @@ export class Quonfig {
   }
 
   /**
-   * Set configs from a raw evaluation payload.
+   * Set configs from a raw evaluation payload. This is the single install
+   * mutation every network path funnels through; it stamps the held generation
+   * watermark and bumps the install count so the reject-older guard
+   * (`shouldInstall`) can order the next install. Callers on a network path go
+   * through `applyLoaderResult`, which enforces the guard first; `setConfig`
+   * itself installs unconditionally (a local SSR `hydrate`/bootstrap seed is a
+   * source of truth and intentionally skips the guard).
    */
   setConfig(rawValues: EvaluationPayload) {
     this._configs = Config.digest(rawValues);
+    this._heldGeneration = rawValues?.meta?.generation ?? 0;
+    this._configInstalls += 1;
     this.loaded = true;
     this.notifySubscribers();
   }
