@@ -1,4 +1,4 @@
-import { headers, DEFAULT_TIMEOUT, getDefaultApiUrls } from "./apiHelpers";
+import { headers, DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY, getDefaultApiUrls } from "./apiHelpers";
 import { encodeContexts } from "./context";
 import type { Contexts, EvaluationPayload, CollectContextMode } from "./types";
 
@@ -13,6 +13,11 @@ export type LoaderParams = {
    */
   domain?: string;
   timeout?: number;
+  /**
+   * How long the hedge waits for the primary (apiUrls[0]) before ALSO firing
+   * the secondary leg(s) in parallel. See {@link DEFAULT_HEDGE_DELAY}.
+   */
+  hedgeDelay?: number;
   collectContextMode?: CollectContextMode;
   clientVersion?: string;
 };
@@ -45,10 +50,17 @@ export default class Loader {
   contexts: Contexts;
   apiUrls: string[];
   timeout: number;
+  hedgeDelay: number;
   collectContextMode: CollectContextMode;
   clientVersion: string;
-  abortTimeoutId: ReturnType<typeof setTimeout> | undefined;
-  abortController: AbortController | undefined;
+  /**
+   * Every fetch leg currently in flight. The hedge runs the primary and
+   * secondary legs concurrently, so a single shared controller (as the old
+   * sequential loop used) would clobber one leg's abort with the other's. We
+   * track them as a set and abort the whole set when a new load() supersedes an
+   * in-flight one (e.g. an updateContext racing a poll tick).
+   */
+  private inFlight: Set<AbortController> = new Set();
 
   /**
    * Per-URL cache of {etag, payload} from prior 200 responses, keyed by the
@@ -74,6 +86,7 @@ export default class Loader {
     apiUrls,
     domain,
     timeout,
+    hedgeDelay,
     collectContextMode = "PERIODIC_EXAMPLE",
     clientVersion = "",
   }: LoaderParams) {
@@ -84,6 +97,7 @@ export default class Loader {
       throw new Error("apiUrls must not be empty");
     }
     this.timeout = timeout || DEFAULT_TIMEOUT;
+    this.hedgeDelay = hedgeDelay ?? DEFAULT_HEDGE_DELAY;
     this.collectContextMode = collectContextMode;
     this.clientVersion = clientVersion;
   }
@@ -93,10 +107,138 @@ export default class Loader {
     return `${apiUrl}/api/v2/configs/eval-with-context/${encodedContext}?collectContextMode=${this.collectContextMode}`;
   }
 
+  /**
+   * Load config, returning the FIRST leg to succeed. Thin wrapper over
+   * {@link loadHedged} preserving the single-result contract used by callers
+   * that only need one payload (and by the loader unit tests). The heal-forward
+   * drain (a late, newer primary leg arriving after the secondary painted) is
+   * only surfaced through `loadHedged`'s onResult callback, so the polling path
+   * in `Quonfig` uses that directly.
+   */
   load(): Promise<LoaderResult> {
-    this.abortController?.abort();
+    let first: LoaderResult | undefined;
+    return this.loadHedged((result) => {
+      if (first === undefined) first = result;
+    }).then(() => first as LoaderResult);
+  }
 
-    return this.loadWithFailover();
+  /**
+   * Hedged load (spec 5e). Fires the primary (apiUrls[0]) immediately and, only
+   * if the primary is slow (no answer within {@link hedgeDelay}) or errors
+   * fast, fires the secondary leg(s) (apiUrls[1+]) IN PARALLEL — it does not
+   * cancel the primary. `onResult` is invoked for EVERY leg that returns a usable
+   * result, in arrival order, so the caller can drain them all through its
+   * reject-older install guard (highest generation wins, not first-arrival): a
+   * stale secondary painting first never stops a later, newer primary from
+   * healing forward (spec 5f.1).
+   *
+   * The returned promise resolves as soon as the FIRST leg succeeds (so first
+   * paint / init is not blocked on a slow primary) while the remaining legs keep
+   * running in the background and continue to feed `onResult`. It rejects only
+   * if EVERY leg fails. A fast primary success suppresses the secondary entirely
+   * (zero extra requests in the common case).
+   */
+  loadHedged(onResult: (result: LoaderResult) => void): Promise<void> {
+    // Supersede any still-in-flight load (e.g. updateContext racing a poll tick):
+    // abort its legs so they can't install over this newer request.
+    this.abortInFlight();
+
+    const primaryUrl = this.apiUrls[0];
+    const secondaryUrls = this.apiUrls.slice(1);
+
+    return new Promise<void>((resolve, reject) => {
+      let pending = 0; // legs currently in flight
+      let sawSuccess = false;
+      let resolved = false;
+      // True while a secondary leg could still be started. A fast primary
+      // success flips this off (suppressing the hedge); firing the secondaries
+      // flips it off too. We can only reject once it is false and no leg is
+      // pending and nothing ever succeeded.
+      let moreLegsPossible = secondaryUrls.length > 0;
+      let lastError: unknown;
+      let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const settle = () => {
+        if (!resolved && pending === 0 && !moreLegsPossible && !sawSuccess) {
+          resolved = true;
+          reject(lastError ?? new Error("All API URLs failed"));
+        }
+      };
+
+      const startLeg = (apiUrl: string) => {
+        pending += 1;
+        this.fetchFromUrl(apiUrl)
+          .then((result) => {
+            sawSuccess = true;
+            onResult(result);
+            if (!resolved) {
+              resolved = true;
+              resolve(); // first paint: unblock as soon as ANY leg succeeds
+            }
+          })
+          .catch((error) => {
+            lastError = error;
+          })
+          .finally(() => {
+            pending -= 1;
+            settle();
+          });
+      };
+
+      const fireSecondaries = () => {
+        if (!moreLegsPossible) return;
+        moreLegsPossible = false;
+        if (hedgeTimer) {
+          clearTimeout(hedgeTimer);
+          hedgeTimer = undefined;
+        }
+        for (const apiUrl of secondaryUrls) startLeg(apiUrl);
+        settle();
+      };
+
+      // Primary leg.
+      pending += 1;
+      this.fetchFromUrl(primaryUrl)
+        .then((result) => {
+          sawSuccess = true;
+          onResult(result);
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+          // Fast primary success suppresses the hedge entirely.
+          moreLegsPossible = false;
+          if (hedgeTimer) {
+            clearTimeout(hedgeTimer);
+            hedgeTimer = undefined;
+          }
+        })
+        .catch((error) => {
+          lastError = error;
+          // A fast primary error fires the hedge NOW rather than idling out the
+          // hedge delay — failover should not wait on a dead primary.
+          fireSecondaries();
+        })
+        .finally(() => {
+          pending -= 1;
+          settle();
+        });
+
+      // Hedge timer: if the primary is merely slow, fire the secondaries after
+      // the delay (the primary keeps running so a late primary win still heals
+      // forward).
+      if (secondaryUrls.length > 0) {
+        hedgeTimer = setTimeout(fireSecondaries, this.hedgeDelay);
+      }
+    });
+  }
+
+  /** Abort and forget every in-flight fetch leg. */
+  private abortInFlight(): void {
+    for (const controller of this.inFlight) {
+      controller.abort();
+    }
+    this.inFlight.clear();
   }
 
   /**
@@ -114,27 +256,20 @@ export default class Loader {
     }
   }
 
-  /**
-   * Try each API URL in order. Return the first successful result.
-   */
-  private async loadWithFailover(): Promise<LoaderResult> {
-    let lastError: any;
-
-    for (const apiUrl of this.apiUrls) {
-      try {
-        return await this.fetchFromUrl(apiUrl);
-      } catch (error) {
-        lastError = error;
-      }
-    }
-
-    throw lastError ?? new Error("All API URLs failed");
-  }
-
   private fetchFromUrl(apiUrl: string): Promise<LoaderResult> {
     return new Promise<LoaderResult>((resolve, reject) => {
-      this.abortController = new AbortController();
-      const { signal } = this.abortController;
+      // Leg-local abort + timeout: the hedge runs legs concurrently, so each
+      // owns its own controller (registered in inFlight for supersede-abort)
+      // and its own timeout. A shared controller would let one leg's timeout
+      // abort the other.
+      const controller = new AbortController();
+      this.inFlight.add(controller);
+      const { signal } = controller;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timeoutId) clearTimeout(timeoutId);
+        this.inFlight.delete(controller);
+      };
 
       const url = this.url(apiUrl);
 
@@ -154,7 +289,7 @@ export default class Loader {
 
       fetch(url, { signal, headers: requestHeaders })
         .then((response) => {
-          this.clearAbortTimeout();
+          cleanup();
 
           if (response.status === 304) {
             // Not modified. Return the payload cached for THIS url so the caller
@@ -204,17 +339,13 @@ export default class Loader {
           resolve({ notModified: false, payload });
         })
         .catch((error) => {
-          this.clearAbortTimeout();
+          cleanup();
           reject(error);
         });
 
-      this.abortTimeoutId = setTimeout(() => {
-        this.abortController?.abort();
+      timeoutId = setTimeout(() => {
+        controller.abort();
       }, this.timeout);
     });
-  }
-
-  clearAbortTimeout() {
-    clearTimeout(this.abortTimeoutId);
   }
 }

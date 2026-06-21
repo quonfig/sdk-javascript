@@ -139,6 +139,7 @@ export class Quonfig {
     apiUrl,
     telemetryUrl,
     timeout,
+    hedgeDelay,
     afterEvaluationCallback = () => {},
     collectEvaluationSummaries = true,
     collectContextMode = "PERIODIC_EXAMPLE",
@@ -166,6 +167,7 @@ export class Quonfig {
       apiUrls: resolvedApiUrls,
       domain,
       timeout,
+      hedgeDelay,
       collectContextMode,
       clientVersion: clientVersionString,
     });
@@ -312,9 +314,13 @@ export class Quonfig {
     this.loader.contexts = this._contexts;
     const sig = encodeContexts(this._contexts);
 
+    // Hedged load (5e): the primary fires first, the secondary only if the
+    // primary is slow/errors. EVERY leg that returns drains through
+    // applyLoaderResult, so the reject-older guard — not first-arrival — decides
+    // what wins. A late, newer primary heals forward over a stale secondary that
+    // painted first.
     return this.loader
-      .load()
-      .then((result) => {
+      .loadHedged((result) => {
         this.applyLoaderResult(result, sig);
       })
       .finally(() => {
@@ -414,9 +420,8 @@ export class Quonfig {
 
     const sig = encodeContexts(this._contexts);
     return this.loader
-      .load()
-      .then((result) => {
-        // First poll fetch. Same guarded install path as load() — see
+      .loadHedged((result) => {
+        // First poll fetch. Same guarded, hedged install path as load() — see
         // applyLoaderResult for the 304/context-switch and reject-older rules.
         this.applyLoaderResult(result, sig);
       })

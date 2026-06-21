@@ -16,7 +16,28 @@ export const headers = (sdkKey: string, _clientVersion: string) => ({
   Authorization: authHeader(sdkKey),
 });
 
-export const DEFAULT_TIMEOUT = 10000;
+/**
+ * Per-leg hard fetch deadline (ms). Lowered from 10s to 3s with the parallel
+ * hedge (spec 5e): a page loaded against a hung primary used to wait the full
+ * 10s before even trying the secondary. 3s sits above a cold-start / mobile
+ * primary (so a slow-but-alive primary isn't clipped) but far below the old
+ * wall. It must stay ABOVE DEFAULT_HEDGE_DELAY so a hedged secondary leg gets
+ * its own budget. Mirrors sdk-go's DefaultConfigFetchTimeout (3s).
+ */
+export const DEFAULT_TIMEOUT = 3000;
+
+/**
+ * How long the hedge waits for the primary leg before ALSO firing the
+ * secondary in parallel (ms). Fire-on-slow, never on a fast primary success,
+ * so the secondary is contacted only for the bounded slice of requests slower
+ * than this delay (spec 5e). Mirrors sdk-go's DefaultConfigFetchHedgeDelay (2s).
+ *
+ * Raising this toward the primary's measured p99 reduces how often the
+ * secondary is touched; the reject-older guard (spec 5f) makes firing it early
+ * harmless either way — the depth-1 secondary's generation=1 is rejected for an
+ * established client, so an early hedge can never regress or flap it.
+ */
+export const DEFAULT_HEDGE_DELAY = 2000;
 
 /**
  * Default Quonfig domain. Used when no explicit URL options are supplied

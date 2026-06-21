@@ -175,6 +175,13 @@ export type InitOptions = {
    */
   telemetryUrl?: string;
   timeout?: number;
+  /**
+   * How long the hedged loader waits for the primary API URL before ALSO
+   * firing the secondary in parallel (ms). Defaults to ~2s. Raise it toward the
+   * primary's measured p99 to contact the secondary less often; the
+   * reject-older guard makes an early hedge harmless regardless. See spec 5e.
+   */
+  hedgeDelay?: number;
   afterEvaluationCallback?: EvaluationCallback;
   collectEvaluationSummaries?: boolean;
   collectContextMode?: CollectContextMode;
