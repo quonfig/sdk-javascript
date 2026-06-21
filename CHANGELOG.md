@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.1.0 - 2026-06-21
+
+Secondary-delivery failover hardening (project/plans/secondary-delivery-platform.md §5e/5f/5h). All
+additive and backward-compatible — pre-watermark servers and existing callers are unaffected.
+
+- **Reject-older install guard (§5f).** The SDK now reads the monotonic `Meta.generation` watermark
+  api-delivery already emits on the eval-with-context response and guards every network install
+  (initial load + poll): a fresh client installs anything; an unversioned snapshot (`generation`
+  absent or `<= 0`, e.g. a pre-watermark server) installs anyway (carve-out); otherwise a payload
+  installs only if its generation is strictly greater than the held one. A failover to the depth-1
+  secondary (which reports `generation = 1`) can no longer regress or flap an established client. A
+  context switch always installs (a different query, generation-incomparable).
+- **Parallel hedge (§5e).** `loadWithFailover` is replaced with a hedge: the primary fires first and
+  the secondary only if the primary is slow (no answer within the hedge delay, default ~2s) or
+  errors fast — then both run in parallel and every leg drains through the reject-older guard, so a
+  late but newer primary still wins over a stale secondary that returned first. A fast primary
+  success never contacts the secondary. The per-URL timeout drops from 10s to 3s. New `hedgeDelay`
+  init option (defaults to ~2s); `timeout` still tunable.
+- **Last-known-good cache (§5h).** A new localStorage cache, keyed by SDK key + context and stamped
+  with the generation watermark, persists each fresh install. When every API URL fails, the SDK
+  serves the cached config marked stale instead of throwing, so a returning visitor survives even a
+  simultaneous GitHub+Fly outage. `getDetails()` reports the OpenFeature-standard `STALE` reason and
+  a new `stale` getter exposes it; the next successful load heals back to authoritative. The
+  watermark rule applies to the cache too — an older live response never regresses it.
+
+  Privacy: config payloads now persist across sessions in localStorage. Frontend keys receive only
+  frontend-scoped payloads and confidential values are ciphertext at rest, so nothing secret is
+  stored in the clear; cross-session persistence on a shared device is the one new exposure, and it
+  is accepted (see §5h).
+
 ## 1.0.0 - 2026-06-06
 
 - **Stable 1.0.0 release.** The Quonfig browser/JavaScript SDK is now declared stable. No API or
