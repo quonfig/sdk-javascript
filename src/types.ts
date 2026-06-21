@@ -77,8 +77,19 @@ export type Evaluation = {
   weightedValueIndex?: number;
 };
 
-/** OpenFeature-compatible reason returned by `getDetails`. */
-export type EvaluationReason = "STATIC" | "TARGETING_MATCH" | "SPLIT" | "DEFAULT" | "ERROR";
+/**
+ * OpenFeature-compatible reason returned by `getDetails`. `STALE` (an
+ * OpenFeature-standard reason) is reported when the value comes from the
+ * last-known-good localStorage cache because every API URL was unreachable
+ * (spec 5h) — the value is non-authoritative until the network recovers.
+ */
+export type EvaluationReason =
+  | "STATIC"
+  | "TARGETING_MATCH"
+  | "SPLIT"
+  | "DEFAULT"
+  | "STALE"
+  | "ERROR";
 
 /** Error code attached to `getDetails` results when `reason === "ERROR"`. */
 export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";

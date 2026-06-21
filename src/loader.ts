@@ -1,5 +1,6 @@
 import { headers, DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY, getDefaultApiUrls } from "./apiHelpers";
 import { encodeContexts } from "./context";
+import { lkgKey, readLkg } from "./lkgCache";
 import type { Contexts, EvaluationPayload, CollectContextMode } from "./types";
 
 export type LoaderParams = {
@@ -41,6 +42,13 @@ export type LoaderParams = {
 export type LoaderResult = {
   notModified: boolean;
   payload: EvaluationPayload;
+  /**
+   * True when this payload came from the last-known-good localStorage cache
+   * because every API URL failed (spec 5h), rather than from the network. The
+   * caller marks the served config stale (reason STALE) so consumers know it is
+   * non-authoritative until the network recovers.
+   */
+  stale?: boolean;
 };
 
 type CacheEntry = { etag: string; payload: EvaluationPayload };
@@ -159,10 +167,21 @@ export default class Loader {
       let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
 
       const settle = () => {
-        if (!resolved && pending === 0 && !moreLegsPossible && !sawSuccess) {
+        if (resolved || pending !== 0 || moreLegsPossible || sawSuccess) return;
+        // Every leg failed and nothing succeeded. Before giving up, serve the
+        // last-known-good cache (spec 5h) so a returning visitor with no network
+        // gets their last config marked stale instead of an init throw. The
+        // caller drains it through the reject-older guard, so it can never
+        // regress an established client. Absent a cache entry, reject as before.
+        const cached = this.readLastKnownGood();
+        if (cached) {
           resolved = true;
-          reject(lastError ?? new Error("All API URLs failed"));
+          onResult({ notModified: false, payload: cached.payload, stale: true });
+          resolve();
+          return;
         }
+        resolved = true;
+        reject(lastError ?? new Error("All API URLs failed"));
       };
 
       const startLeg = (apiUrl: string) => {
@@ -239,6 +258,16 @@ export default class Loader {
       controller.abort();
     }
     this.inFlight.clear();
+  }
+
+  /**
+   * The last-known-good cache entry for the current (sdkKey, context), or
+   * undefined if there is none / localStorage is unavailable. Keyed
+   * host-agnostically so an entry persisted while talking to the primary is
+   * still served when both primary and secondary are unreachable.
+   */
+  private readLastKnownGood() {
+    return readLkg(lkgKey(this.sdkKey, encodeContexts(this.contexts)));
   }
 
   /**

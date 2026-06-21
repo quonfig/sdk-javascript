@@ -4,6 +4,7 @@ import { Config } from "./config";
 import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader, { type LoaderResult } from "./loader";
+import { lkgKey, writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
@@ -109,6 +110,11 @@ export class Quonfig {
   // client (install anything) from an established one (reject-older).
   private _heldGeneration = 0;
   private _configInstalls = 0;
+  // True when the currently-installed config came from the last-known-good
+  // localStorage cache because every API URL was unreachable (spec 5h). Any
+  // fresh network install clears it. Surfaced via the `stale` getter and
+  // getDetails reason STALE.
+  private _stale = false;
   private _subscribers: Set<() => void> = new Set();
   // Bootstrap (globalThis._quonfigBootstrap) is a ONE-SHOT init seed: an SSR
   // snapshot used to paint instantly on the first load() without a network
@@ -257,6 +263,16 @@ export class Quonfig {
   }
 
   /**
+   * Whether the currently-served config came from the last-known-good
+   * localStorage cache because every API URL was unreachable (spec 5h). When
+   * true the values are non-authoritative; the next successful network load
+   * heals this back to false. `getDetails()` also reports reason "STALE".
+   */
+  get stale(): boolean {
+    return this._stale;
+  }
+
+  /**
    * Register a listener invoked synchronously after every config mutation
    * (poll fetch, `setConfig`, `hydrate`). Returns an unsubscribe function.
    *
@@ -356,6 +372,21 @@ export class Quonfig {
       if (contextChanged || this.shouldInstall(result.payload)) {
         this.setConfig(result.payload);
         this._loadedContextSig = sig;
+        // A served-from-cache install (result.stale) is non-authoritative until
+        // the network recovers; a fresh network install clears staleness AND
+        // refreshes the last-known-good cache (spec 5h). We persist only what
+        // we just installed (post reject-older guard), so the per-context entry
+        // stays monotonic — an older live response is dropped by the guard
+        // before it reaches here, so "the watermark rule applies to the cache
+        // too" holds without a separate check. A served-stale payload is
+        // already in the cache, so it is not re-persisted.
+        this._stale = result.stale === true;
+        if (!result.stale && this.loader) {
+          writeLkg(lkgKey(this.loader.sdkKey, sig), {
+            generation: this._heldGeneration,
+            payload: result.payload,
+          });
+        }
       }
     }
   }
@@ -613,9 +644,16 @@ export class Quonfig {
     const md = config.configEvaluationMetadata;
     // Older api-delivery deployments don't emit `reason` on the wire; treat
     // their absence as STATIC so consumers see a sensible variant string.
-    const reason: EvaluationReason = md?.reason ?? "STATIC";
+    const underlyingReason: EvaluationReason = md?.reason ?? "STATIC";
     const ruleIndex = md?.ruleIndex;
     const weightedValueIndex = md?.weightedValueIndex;
+
+    // When serving from the stale last-known-good cache (spec 5h), report the
+    // OpenFeature-standard STALE reason so consumers know the value is
+    // non-authoritative — but keep `variant` and `flagMetadata` derived from
+    // the UNDERLYING targeting reason, so cached values still expose which
+    // rule/split produced them.
+    const reason: EvaluationReason = this._stale ? "STALE" : underlyingReason;
 
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
       if (this._collectEvaluationSummaries) {
@@ -627,13 +665,13 @@ export class Quonfig {
     return {
       value: config.value as unknown as T,
       reason,
-      variant: buildVariant(reason, ruleIndex, weightedValueIndex),
+      variant: buildVariant(underlyingReason, ruleIndex, weightedValueIndex),
       flagMetadata: buildFlagMetadata(
         md?.configId,
         md?.configType,
         ruleIndex,
         weightedValueIndex,
-        reason
+        underlyingReason
       ),
     };
   }
