@@ -4,19 +4,19 @@
  * sdk-javascript installed every fetched payload UNCONDITIONALLY, and the only
  * version field on the wire was an unordered commit SHA. With the parallel
  * hedge (5e) live, any primary response slower than the hedge delay — or a
- * failover to the depth-1 secondary, which stamps generation=1 for everything —
- * would overwrite fresher held data with an up-to-60s-stale payload, then the
- * next fast primary poll would flip it forward again: flag oscillation on a
- * healthy client.
+ * failover to a lagging secondary (equal-or-lower generation; the fixtures
+ * below use gen=1 as the stale leg) — would overwrite fresher held data with
+ * an up-to-60s-stale payload, then the next fast primary poll would flip it
+ * forward again: flag oscillation on a healthy client.
  *
  * The fix consumes the monotonic Meta.generation the backend already emits
  * (eval_context.go sets it) and guards every NETWORK install path with the
  * canonical reject-older rule (mirrors sdk-node/src/quonfig.ts:1251):
  *
  *   - fresh client (nothing installed) installs anything
- *   - incoming generation <= 0 (absent / pre-watermark / depth-1 secondary)
- *     installs anyway — the carve-out; an unversioned payload carries no
- *     ordering info so it cannot be rejected as "older"
+ *   - incoming generation <= 0 (absent / pre-watermark) installs anyway — the
+ *     carve-out; an unversioned payload carries no ordering info so it cannot
+ *     be rejected as "older"
  *   - otherwise install iff incoming generation strictly exceeds the held one;
  *     equal or lower is a no-op (no regress, no flap)
  *

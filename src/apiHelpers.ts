@@ -34,8 +34,9 @@ export const DEFAULT_TIMEOUT = 3000;
  *
  * Raising this toward the primary's measured p99 reduces how often the
  * secondary is touched; the reject-older guard (spec 5f) makes firing it early
- * harmless either way — the depth-1 secondary's generation=1 is rejected for an
- * established client, so an early hedge can never regress or flap it.
+ * harmless either way — both legs emit the honest commit count (spec 5f.1), so
+ * a lagging secondary's generation is equal-or-lower and an established client
+ * no-ops or rejects it; an early hedge can never regress or flap it.
  */
 export const DEFAULT_HEDGE_DELAY = 2000;
 

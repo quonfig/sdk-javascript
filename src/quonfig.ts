@@ -105,7 +105,7 @@ export class Quonfig {
   // Reject-older install guard state (qfg-7h5d.2.1, spec 5f/5f.1).
   // `_heldGeneration` is the monotonic Meta.generation of the payload currently
   // in `_configs` (0 before the first install, or when the server is
-  // unversioned / the depth-1 secondary's gen=1 floor). `_configInstalls`
+  // unversioned / pre-watermark). `_configInstalls`
   // counts installs over the client's lifetime so the guard can tell a fresh
   // client (install anything) from an established one (reject-older).
   private _heldGeneration = 0;
@@ -253,10 +253,9 @@ export class Quonfig {
 
   /**
    * Meta.generation of the config the client is currently holding (0 before the
-   * first install, or when the server predates the watermark / is the depth-1
-   * secondary's gen=1 floor). A higher generation is strictly newer; the
-   * reject-older guard compares against it on every network install path
-   * (qfg-7h5d.2.1, spec 5f).
+   * first install, or when the server predates the watermark). A higher
+   * generation is strictly newer; the reject-older guard compares against it on
+   * every network install path (qfg-7h5d.2.1, spec 5f).
    */
   get heldGeneration(): number {
     return this._heldGeneration;
@@ -359,8 +358,9 @@ export class Quonfig {
    *      context is a no-op.
    *   2. Is the data new enough to install? A SAME-context refresh runs through
    *      `shouldInstall` — the reject-older watermark check that stops a slow
-   *      primary or a failover to the stale (gen=1) secondary from regressing or
-   *      flapping an established client. A context SWITCH is a different query
+   *      primary or a failover to a lagging (equal-or-lower generation)
+   *      secondary from regressing or flapping an established client. A context
+   *      SWITCH is a different query
    *      whose generation is not comparable to the held one, so it always
    *      installs (the "fresh for this context" case — a stale secondary may
    *      seed it, bounded, exactly as the spec allows; the guard must never
@@ -408,10 +408,11 @@ export class Quonfig {
    *     established client backward, an equal second leg can't flap, and a later
    *     newer leg heals forward.
    *
-   * The depth-1 secondary's generation is a positive 1, so it is rejected by the
-   * strict-greater check (an established client holds a far higher primary
-   * generation, so `1 > held` is false — spec 5f.1), NOT by the carve-out. Only
-   * a truly unversioned (<= 0) payload takes the carve-out.
+   * Both delivery legs emit the honest true commit count (spec 5f.1, revised by
+   * the 2026-06-29 A2 fix): a caught-up secondary matches the held generation
+   * (equal = no-op) and a lagging one is strictly lower, so it is rejected by
+   * the strict-greater check, NOT by the carve-out. Only a truly unversioned
+   * (<= 0) payload takes the carve-out.
    */
   private shouldInstall(payload: EvaluationPayload): boolean {
     if (this._configInstalls === 0) return true;

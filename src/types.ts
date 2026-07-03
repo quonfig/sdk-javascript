@@ -128,9 +128,11 @@ export type EvaluationPayload = {
      * 5f) can order two snapshots and refuse to regress an established client.
      *
      * Absent or <= 0 means "unversioned" — a server that predates the
-     * watermark, or the depth-1 secondary, which reports generation=1 for
-     * everything (the "always older" standby floor, spec 5f.1). The guard's
-     * carve-out installs an unversioned payload rather than freezing on it.
+     * watermark; the guard's carve-out installs an unversioned payload rather
+     * than freezing on it. Both delivery legs emit the honest true commit count
+     * (spec 5f.1, A2 fix): equal when the secondary's mirror is caught up,
+     * strictly lower when it lags — so a lagging secondary is equal-or-lower
+     * and can never regress an established client.
      */
     generation?: number;
   };

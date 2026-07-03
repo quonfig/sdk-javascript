@@ -9,9 +9,10 @@ additive and backward-compatible — pre-watermark servers and existing callers 
   api-delivery already emits on the eval-with-context response and guards every network install
   (initial load + poll): a fresh client installs anything; an unversioned snapshot (`generation`
   absent or `<= 0`, e.g. a pre-watermark server) installs anyway (carve-out); otherwise a payload
-  installs only if its generation is strictly greater than the held one. A failover to the depth-1
-  secondary (which reports `generation = 1`) can no longer regress or flap an established client. A
-  context switch always installs (a different query, generation-incomparable).
+  installs only if its generation is strictly greater than the held one. A failover to a lagging
+  secondary (whose generation is equal-or-lower, since both delivery legs emit the honest commit
+  count — spec 5f.1) can no longer regress or flap an established client. A context switch always
+  installs (a different query, generation-incomparable).
 - **Parallel hedge (§5e).** `loadWithFailover` is replaced with a hedge: the primary fires first and
   the secondary only if the primary is slow (no answer within the hedge delay, default ~2s) or
   errors fast — then both run in parallel and every leg drains through the reject-older guard, so a
