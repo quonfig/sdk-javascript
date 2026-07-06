@@ -27,6 +27,17 @@ export const headers = (sdkKey: string, _clientVersion: string) => ({
 export const DEFAULT_TIMEOUT = 3000;
 
 /**
+ * Per-request hard deadline for telemetry POSTs (ms). Kept SEPARATE from
+ * DEFAULT_TIMEOUT on purpose: the 1.1.0 hedge lowered the eval fetch budget to
+ * 3s (latency matters on the read path), but telemetry uploads are a fire-and-
+ * forget background flush where a longer budget is fine and a short one just
+ * drops data on a slow-but-alive endpoint. Restores the pre-1.1.0 10s the
+ * uploader had before it began sharing DEFAULT_TIMEOUT. Mirrors sdk-node's
+ * telemetry-upload timeout.
+ */
+export const TELEMETRY_TIMEOUT = 10000;
+
+/**
  * How long the hedge waits for the primary leg before ALSO firing the
  * secondary in parallel (ms). Fire-on-slow, never on a fast primary success,
  * so the secondary is contacted only for the bounded slice of requests slower

@@ -1,4 +1,4 @@
-import { headers, DEFAULT_TIMEOUT, getDefaultTelemetryUrl } from "../apiHelpers";
+import { headers, TELEMETRY_TIMEOUT, getDefaultTelemetryUrl } from "../apiHelpers";
 
 export type TelemetryUploaderParams = {
   sdkKey: string;
@@ -22,7 +22,7 @@ export default class TelemetryUploader {
   constructor({ sdkKey, telemetryUrl, domain, timeout, clientVersion }: TelemetryUploaderParams) {
     this.sdkKey = sdkKey;
     this.telemetryUrl = telemetryUrl || getDefaultTelemetryUrl({ domain });
-    this.timeout = timeout || DEFAULT_TIMEOUT;
+    this.timeout = timeout || TELEMETRY_TIMEOUT;
     this.clientVersion = clientVersion;
   }
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Telemetry upload timeout restored to 10s.** 1.1.0's hedge lowered the shared per-request timeout
+  to 3s for the eval fetch, which also silently clipped background telemetry POSTs from 10s to 3s
+  (they shared one `DEFAULT_TIMEOUT`). Telemetry now uses its own `TELEMETRY_TIMEOUT` (10s), so a
+  slow-but-alive telemetry endpoint no longer drops shape/example data that the eval-latency budget
+  was never meant to govern. No API change; the `timeout` init option still overrides it.
+
 ## 1.1.0 - 2026-06-21
 
 Secondary-delivery failover hardening (project/plans/secondary-delivery-platform.md §5e/5f/5h). All
@@ -18,7 +26,9 @@ additive and backward-compatible — pre-watermark servers and existing callers 
   errors fast — then both run in parallel and every leg drains through the reject-older guard, so a
   late but newer primary still wins over a stale secondary that returned first. A fast primary
   success never contacts the secondary. The per-URL timeout drops from 10s to 3s. New `hedgeDelay`
-  init option (defaults to ~2s); `timeout` still tunable.
+  init option (defaults to ~2s); `timeout` still tunable. (Correction: this 3s applied only to the
+  eval fetch, but 1.1.0 also shared the constant with telemetry uploads, unintentionally clipping
+  them to 3s; the telemetry timeout is restored to 10s in Unreleased above.)
 - **Last-known-good cache (§5h).** A new localStorage cache, keyed by SDK key + context and stamped
   with the generation watermark, persists each fresh install. When every API URL fails, the SDK
   serves the cached config marked stale instead of throwing, so a returning visitor survives even a
