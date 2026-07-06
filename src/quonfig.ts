@@ -186,6 +186,21 @@ export class Quonfig {
       );
     }
 
+    // A single explicit API URL disables automatic failover. The default (and
+    // every `domain` / `QUONFIG_DOMAIN`-derived) URL list carries BOTH a
+    // primary and a secondary leg, and the SDK hedges/fails over between them
+    // (spec 5e). An explicit `apiUrls` (or the singular `apiUrl` alias)
+    // replaces that list wholesale, so a one-entry override silently drops the
+    // secondary. `resolvedApiUrls` is undefined when the caller supplied
+    // neither, so the default two-leg list never triggers this. Warn once at
+    // init so the lost failover is visible instead of silent.
+    if (resolvedApiUrls !== undefined && resolvedApiUrls.length < 2) {
+      console.warn(
+        "Quonfig: explicit apiUrls disables automatic failover to the secondary; " +
+          "pass both primary and secondary URLs to keep it"
+      );
+    }
+
     this.loader = new Loader({
       sdkKey,
       contexts: context,

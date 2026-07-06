@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`init()` warns when an explicit `apiUrls` disables failover.** The default (and every `domain` /
+  `QUONFIG_DOMAIN`-derived) API-URL list carries BOTH a primary and a secondary leg, and the SDK
+  hedges/fails over between them (§5e). An explicit `apiUrls` (or the singular `apiUrl` alias)
+  replaces that list wholesale, so a single-entry override silently dropped the secondary and
+  disabled automatic failover. `init()` now logs a one-line WARN pointing the caller at the fix
+  (pass both a primary and a secondary URL). The default two-leg list never warns. Diagnostic only;
+  no behavior change, no new dependencies. New README `Failover & QUONFIG_DOMAIN` section documents
+  the URL derivation and the failover model.
 - **`init()` warns when `timeout <= hedgeDelay`.** The per-leg fetch `timeout` must stay above
   `hedgeDelay` (default 2000ms): if it doesn't, the primary leg is aborted before the hedge timer
   can fire, so the parallel hedge (§5e) silently degrades to error-only sequential failover — the
