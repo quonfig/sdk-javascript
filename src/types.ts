@@ -187,12 +187,26 @@ export type InitOptions = {
    * that split telemetry off the primary domain. When set, wins over `domain`.
    */
   telemetryUrl?: string;
+  /**
+   * Per-leg hard fetch deadline (ms). Defaults to ~3s.
+   *
+   * INVARIANT: keep this ABOVE {@link hedgeDelay}. If `timeout <= hedgeDelay`
+   * the primary leg is aborted before the hedge timer can fire, so the parallel
+   * hedge silently degrades to error-only sequential failover (the secondary is
+   * only contacted after the primary fully times out, never concurrently with a
+   * still-alive-but-slow primary). `init()` logs a warning when this invariant
+   * is violated. See spec 5e.
+   */
   timeout?: number;
   /**
    * How long the hedged loader waits for the primary API URL before ALSO
    * firing the secondary in parallel (ms). Defaults to ~2s. Raise it toward the
    * primary's measured p99 to contact the secondary less often; the
-   * reject-older guard makes an early hedge harmless regardless. See spec 5e.
+   * reject-older guard makes an early hedge harmless regardless.
+   *
+   * Keep {@link timeout} above this value — a `timeout <= hedgeDelay` aborts the
+   * primary before the hedge can fire and degrades the hedge to error-only
+   * failover (`init()` warns when this happens). See spec 5e.
    */
   hedgeDelay?: number;
   afterEvaluationCallback?: EvaluationCallback;

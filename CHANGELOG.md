@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **`init()` warns when `timeout <= hedgeDelay`.** The per-leg fetch `timeout` must stay above
+  `hedgeDelay` (default 2000ms): if it doesn't, the primary leg is aborted before the hedge timer
+  can fire, so the parallel hedge (§5e) silently degrades to error-only sequential failover — the
+  secondary is only contacted after the primary fully times out, never concurrently with a
+  still-alive-but-slow primary. `init()` now logs a clear warning naming both effective values, and
+  the `timeout` / `hedgeDelay` option jsdoc documents the invariant. Diagnostic only; no behavior
+  change.
 - **Telemetry upload timeout restored to 10s.** 1.1.0's hedge lowered the shared per-request timeout
   to 3s for the eval fetch, which also silently clipped background telemetry POSTs from 10s to 3s
   (they shared one `DEFAULT_TIMEOUT`). Telemetry now uses its own `TELEMETRY_TIMEOUT` (10s), so a

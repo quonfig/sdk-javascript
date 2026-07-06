@@ -4,6 +4,7 @@ import { Config } from "./config";
 import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader, { type LoaderResult } from "./loader";
+import { DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY } from "./apiHelpers";
 import { lkgKey, writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
 
@@ -166,6 +167,24 @@ export class Quonfig {
     const resolvedApiUrls = apiUrls ?? (apiUrl ? [apiUrl] : undefined);
 
     const clientVersionString = `${this.clientName}-${this.clientVersion}`;
+
+    // Invariant: the per-leg fetch `timeout` must stay ABOVE `hedgeDelay`
+    // (spec 5e). If timeout <= hedgeDelay the primary leg is aborted before the
+    // hedge timer can fire the secondary in parallel, so the parallel hedge
+    // silently degrades to error-only sequential failover — the secondary is
+    // contacted only after the primary fully times out, never concurrently with
+    // a still-alive-but-slow primary. Warn (with the effective values) rather
+    // than fail so an over-tight timeout is visible instead of silent.
+    const effectiveTimeout = timeout || DEFAULT_TIMEOUT;
+    const effectiveHedgeDelay = hedgeDelay ?? DEFAULT_HEDGE_DELAY;
+    if (effectiveTimeout <= effectiveHedgeDelay) {
+      console.warn(
+        `Quonfig: timeout (${effectiveTimeout}ms) is not above hedgeDelay (${effectiveHedgeDelay}ms). ` +
+          `The primary leg is aborted before the parallel hedge can fire, degrading the hedge to ` +
+          `error-only failover (the secondary is only tried after the primary fully times out, not ` +
+          `in parallel). Set timeout above hedgeDelay to keep the hedge parallel.`
+      );
+    }
 
     this.loader = new Loader({
       sdkKey,
