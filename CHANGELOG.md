@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-07-08
 
 - **`init()` warns when an explicit `apiUrls` disables failover.** The default (and every `domain` /
   `QUONFIG_DOMAIN`-derived) API-URL list carries BOTH a primary and a secondary leg, and the SDK
@@ -43,7 +43,7 @@ additive and backward-compatible — pre-watermark servers and existing callers 
   success never contacts the secondary. The per-URL timeout drops from 10s to 3s. New `hedgeDelay`
   init option (defaults to ~2s); `timeout` still tunable. (Correction: this 3s applied only to the
   eval fetch, but 1.1.0 also shared the constant with telemetry uploads, unintentionally clipping
-  them to 3s; the telemetry timeout is restored to 10s in Unreleased above.)
+  them to 3s; the telemetry timeout is restored to 10s in 1.2.0 above.)
 - **Last-known-good cache (§5h).** A new localStorage cache, keyed by SDK key + context and stamped
   with the generation watermark, persists each fresh install. When every API URL fails, the SDK
   serves the cached config marked stale instead of throwing, so a returning visitor survives even a
