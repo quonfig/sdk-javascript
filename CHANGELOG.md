@@ -1,15 +1,15 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 - 2026-07-24
 
-- **Eval-summary counters now send the canonical int `reason` wire code** (1=STATIC
-  2=TARGETING_MATCH 3=SPLIT, matching the backend SDKs) instead of echoing the eval-context string
-  form (`"TARGETING_MATCH"`). Since api-delivery began emitting `reason` on the wire (2026-06-29),
-  the string leaked into telemetry counters and api-telemetry's `z.number()` validation rejected the
-  **entire** telemetry envelope — a total browser-telemetry blackout for any workspace with
-  rule-matched evals (qfg-h8xn). The server now also coerces the string form, so already-shipped
-  0.0.16–1.2.0 clients recover without upgrading; this change restores wire-contract consistency
-  going forward. Counters without a reason are unchanged (field omitted).
+- **Fix: eval-summary telemetry counters now report `reason` as the numeric wire code** (1=STATIC
+  2=TARGETING_MATCH 3=SPLIT), matching the backend SDKs. Previously the counter carried the
+  OpenFeature-style string form (e.g. `"TARGETING_MATCH"`), which the telemetry ingestion API's
+  stricter validation could reject — evaluation-summary batches containing a rule-matched evaluation
+  could be dropped as a result (qfg-h8xn). The ingestion service now also accepts and normalizes the
+  string form, so existing 0.0.16–1.2.0 clients work without upgrading; this release aligns the SDK
+  with the canonical wire contract. Counters without a reason are unchanged (field omitted). No API
+  changes.
 
 ## 1.2.0 - 2026-07-08
 
