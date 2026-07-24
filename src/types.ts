@@ -232,11 +232,15 @@ export type InitOptions = {
 export const QUONFIG_SDK_LOGGING_CONTEXT_NAME = "quonfig-sdk-logging";
 
 /**
- * Telemetry counter for a single config evaluation.
+ * Telemetry counter for a single config evaluation. On the wire `reason` is
+ * the canonical int code shared with the backend SDKs (1=STATIC
+ * 2=TARGETING_MATCH 3=SPLIT), not the string `EvaluationReason` form —
+ * api-telemetry validates it as a number (qfg-h8xn).
  */
-export type ConfigEvaluationCounter = Omit<ConfigEvaluationMetadata, "configType"> & {
+export type ConfigEvaluationCounter = Omit<ConfigEvaluationMetadata, "configType" | "reason"> & {
   selectedValue: any;
   count: number;
+  reason?: number;
 };
 
 /**

@@ -1,7 +1,19 @@
 import { PeriodicSync } from "./periodicSync";
 import { Config } from "../config";
-import type { ConfigEvaluationMetadata, ConfigEvaluationCounter } from "../types";
+import type { ConfigEvaluationMetadata, ConfigEvaluationCounter, EvaluationReason } from "../types";
 import type { Quonfig } from "../quonfig";
+
+// Canonical reason wire codes shared with the backend SDKs (sdk-node
+// reason.ts: 0=unknown 1=STATIC 2=TARGETING_MATCH 3=SPLIT 4=DEFAULT 5=ERROR).
+// STALE is browser-local (LKG cache) with no backend equivalent -> unknown.
+const REASON_WIRE_CODES: Record<EvaluationReason, number> = {
+  STATIC: 1,
+  TARGETING_MATCH: 2,
+  SPLIT: 3,
+  DEFAULT: 4,
+  STALE: 0,
+  ERROR: 5,
+};
 
 type ConfigEvaluationSummary = {
   key: string;
@@ -52,13 +64,20 @@ export const massageSelectedValue = (config: Config): any => {
 export const massageConfigForTelemetry = (
   config: Config,
   metadata: Omit<ConfigEvaluationMetadata, "configType">
-): ConfigEvaluationCounter => ({
-  ...metadata,
-  selectedValue: {
-    [config.type]: massageSelectedValue(config),
-  },
-  count: 0,
-});
+): ConfigEvaluationCounter => {
+  const { reason, ...rest } = metadata;
+  const counter: ConfigEvaluationCounter = {
+    ...rest,
+    selectedValue: {
+      [config.type]: massageSelectedValue(config),
+    },
+    count: 0,
+  };
+  if (reason !== undefined) {
+    counter.reason = REASON_WIRE_CODES[reason] ?? 0;
+  }
+  return counter;
+};
 
 export class EvaluationSummaryAggregator extends PeriodicSync<ConfigEvaluationCounter> {
   private maxKeys: number;

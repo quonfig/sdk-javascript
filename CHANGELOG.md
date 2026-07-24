@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Eval-summary counters now send the canonical int `reason` wire code** (1=STATIC
+  2=TARGETING_MATCH 3=SPLIT, matching the backend SDKs) instead of echoing the eval-context string
+  form (`"TARGETING_MATCH"`). Since api-delivery began emitting `reason` on the wire (2026-06-29),
+  the string leaked into telemetry counters and api-telemetry's `z.number()` validation rejected the
+  **entire** telemetry envelope — a total browser-telemetry blackout for any workspace with
+  rule-matched evals (qfg-h8xn). The server now also coerces the string form, so already-shipped
+  0.0.16–1.2.0 clients recover without upgrading; this change restores wire-contract consistency
+  going forward. Counters without a reason are unchanged (field omitted).
+
 ## 1.2.0 - 2026-07-08
 
 - **`init()` warns when an explicit `apiUrls` disables failover.** The default (and every `domain` /
