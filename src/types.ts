@@ -211,6 +211,35 @@ export type InitOptions = {
   hedgeDelay?: number;
   afterEvaluationCallback?: EvaluationCallback;
   collectEvaluationSummaries?: boolean;
+  /**
+   * Telemetry tick interval (ms): how often the evaluation-summary window is
+   * sent. Default 30000. At most one telemetry POST is in flight; a tick that
+   * fires while one is out is skipped and its data rolls into the next window.
+   */
+  telemetryFlushIntervalMs?: number;
+  /**
+   * Per-POST deadline (ms) for telemetry uploads. Default 10000. Separate from
+   * the eval-fetch {@link timeout}, which no longer affects telemetry.
+   */
+  telemetryTimeoutMs?: number;
+  /**
+   * How many failed telemetry batches are kept (in memory, for the life of
+   * the page) and resent unchanged. Default 5; the oldest is dropped beyond it.
+   */
+  telemetryMaxRetainedBatches?: number;
+  /**
+   * Byte cap on the kept telemetry batches. Default 524288 (512KB). A single
+   * batch larger than this is sent once and never kept.
+   */
+  telemetryMaxRetainedBytes?: number;
+  /** A kept telemetry batch older than this (ms) is discarded. Default 300000 (5 min). */
+  telemetryMaxRetainedAgeMs?: number;
+  /**
+   * Distinct (flag/config key, type) pairs recorded per telemetry window.
+   * Default 10000. New keys beyond the cap are not recorded; keys already in
+   * the window keep counting.
+   */
+  telemetryMaxEvaluationSummaries?: number;
   collectContextMode?: CollectContextMode;
   /**
    * Config key used by the `shouldLog({loggerPath, ...})` convenience overload.

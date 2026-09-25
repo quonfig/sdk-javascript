@@ -9,7 +9,12 @@ import { lkgKey, writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
+// Telemetry debug lines print only when this log-level config evaluates to
+// DEBUG (or lower), the same gate the SDK's internal debug logging always used.
+const TELEMETRY_LOG_LEVEL_KEY = "log-level.quonfig-javascript.quonfig.telemetry";
 import TelemetryUploader from "./telemetry/uploader";
+import { TelemetryReporter, resolveTelemetryConfig } from "./telemetry/reporter";
+import type { TelemetryLogger } from "./telemetry/transportQueue";
 import version from "./version";
 import type {
   ConfigValue,
@@ -94,6 +99,8 @@ export class Quonfig {
   private _instanceHash: string = uuid();
   private _collectEvaluationSummaries = true;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
+  private telemetryReporter: TelemetryReporter | undefined;
+  private pageHideListener: (() => void) | undefined;
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
   // Encoded signature of the context whose evaluations currently populate
@@ -151,6 +158,12 @@ export class Quonfig {
     collectEvaluationSummaries = true,
     collectContextMode = "PERIODIC_EXAMPLE",
     loggerKey,
+    telemetryFlushIntervalMs,
+    telemetryTimeoutMs,
+    telemetryMaxRetainedBatches,
+    telemetryMaxRetainedBytes,
+    telemetryMaxRetainedAgeMs,
+    telemetryMaxEvaluationSummaries,
   }: InitOptions): Promise<void> {
     if (!context) {
       throw new Error("Context must be provided");
@@ -212,28 +225,50 @@ export class Quonfig {
       clientVersion: clientVersionString,
     });
 
+    const telemetryConfig = resolveTelemetryConfig({
+      flushIntervalMs: telemetryFlushIntervalMs,
+      timeoutMs: telemetryTimeoutMs,
+      maxRetainedBatches: telemetryMaxRetainedBatches,
+      maxRetainedBytes: telemetryMaxRetainedBytes,
+      maxRetainedAgeMs: telemetryMaxRetainedAgeMs,
+      maxEvaluationSummaries: telemetryMaxEvaluationSummaries,
+    });
+
+    // The telemetry deadline is its own option: the eval-fetch `timeout`
+    // (3s, tuned for read latency) no longer reaches telemetry (qfg-y8je.11).
     this._telemetryUploader = new TelemetryUploader({
       sdkKey,
       telemetryUrl,
       domain,
-      timeout,
+      timeout: telemetryConfig.timeoutMs,
       clientVersion: clientVersionString,
     });
 
+    // A re-init replaces the reporter; stop the old one so its timer and
+    // pagehide listener do not leak.
+    this.teardownTelemetry();
+
     this._collectEvaluationSummaries = collectEvaluationSummaries;
     if (collectEvaluationSummaries) {
-      this.evaluationSummaryAggregator = new EvaluationSummaryAggregator(this, 100000);
-    }
-
-    // Flush telemetry on page unload (browser only)
-    if (
-      collectEvaluationSummaries &&
-      typeof window !== "undefined" &&
-      typeof window.addEventListener === "function"
-    ) {
-      window.addEventListener("beforeunload", () => {
-        this.evaluationSummaryAggregator?.sync();
+      this.evaluationSummaryAggregator = new EvaluationSummaryAggregator(
+        this,
+        telemetryConfig.maxEvaluationSummaries
+      );
+      this.telemetryReporter = new TelemetryReporter({
+        uploader: this._telemetryUploader,
+        aggregator: this.evaluationSummaryAggregator,
+        logger: this.telemetryLogger(),
+        config: telemetryConfig,
       });
+      this.telemetryReporter.start();
+
+      // Final flush when the page goes away (browser only). pagehide, not
+      // beforeunload: it fires on mobile and on back/forward-cache navigations.
+      if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+        const reporter = this.telemetryReporter;
+        this.pageHideListener = () => reporter.onPageHide();
+        window.addEventListener("pagehide", this.pageHideListener);
+      }
     }
 
     this.afterEvaluationCallback = afterEvaluationCallback;
@@ -530,26 +565,68 @@ export class Quonfig {
    * Drain in-memory telemetry counters by POSTing them to the telemetry
    * endpoint. Use this when you want to ensure counters are shipped without
    * tearing down the SDK (e.g. before a context swap in a long-lived SPA).
+   * After a failed POST it respects the 30s resend floor and Retry-After.
+   * Never rejects.
    */
   async flush(): Promise<void> {
-    await this.evaluationSummaryAggregator?.sync();
+    await this.telemetryReporter?.flush();
   }
 
   /**
-   * Tear down the SDK: drain telemetry, then stop polling and telemetry timers.
+   * Tear down the SDK: stop polling and the telemetry timer, then send the
+   * current telemetry window once (2s deadline, keepalive). Kept batches from
+   * an earlier failure are not resent. Never rejects and leaves no timer armed.
    */
   async close(): Promise<void> {
-    await this.flush();
     this.stopPolling();
-    this.stopTelemetry();
+    const reporter = this.telemetryReporter;
+    this.removePageHideListener();
+    await reporter?.close();
   }
 
   /**
-   * Stop telemetry aggregator timers without draining. Prefer `close()` or
-   * `flush()` for normal teardown — those drain pending counters first.
+   * Stop the telemetry timer and abort any in-flight POST without a final
+   * flush. Prefer `close()` or `flush()` for normal teardown.
    */
   stopTelemetry(): void {
-    this.evaluationSummaryAggregator?.stop();
+    this.telemetryReporter?.stop();
+    this.removePageHideListener();
+  }
+
+  private teardownTelemetry(): void {
+    this.telemetryReporter?.stop();
+    this.telemetryReporter = undefined;
+    this.removePageHideListener();
+  }
+
+  private removePageHideListener(): void {
+    if (this.pageHideListener && typeof window !== "undefined") {
+      window.removeEventListener?.("pagehide", this.pageHideListener);
+    }
+    this.pageHideListener = undefined;
+  }
+
+  /** Console-backed P7 logger; debug is gated by {@link TELEMETRY_LOG_LEVEL_KEY}. */
+  private telemetryLogger(): TelemetryLogger {
+    const prefix = (message: string) => `[quonfig] ${message}`;
+    return {
+      debug: (message) => {
+        let enabled = false;
+        try {
+          enabled = this.shouldLog({
+            configKey: TELEMETRY_LOG_LEVEL_KEY,
+            desiredLevel: "debug",
+            defaultLevel: "error",
+          });
+        } catch {
+          // Logging must never break telemetry.
+        }
+        if (enabled) console.debug(prefix(message));
+      },
+      info: (message) => console.info(prefix(message)),
+      warn: (message) => console.warn(prefix(message)),
+      error: (message) => console.error(prefix(message)),
+    };
   }
 
   /**
