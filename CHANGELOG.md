@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-09-25
 
 - **Telemetry transport policy (qfg-y8je.11).** Telemetry POSTs get their own 10s deadline
   (`telemetryTimeoutMs`); the eval-fetch `timeout` option no longer applies to telemetry. A failed
