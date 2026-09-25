@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+- **Telemetry transport policy (qfg-y8je.11).** Telemetry POSTs get their own 10s deadline
+  (`telemetryTimeoutMs`); the eval-fetch `timeout` option no longer applies to telemetry. A failed
+  batch (timeout, network error, 408, 429, 5xx) is kept in memory for the life of the page and
+  resent byte-for-byte (never merged, so the server dedups a resend of a batch that did land), no
+  sooner than 30s after the failure and after any readable `Retry-After` (up to 10 min). The
+  retained queue is capped at 5 batches / 512KB / 5 min (oldest dropped; a batch larger than the
+  byte cap is never kept). At most one POST is in flight. 401/403/404 disable telemetry for the page
+  with one error; any other 4xx drops that batch with one error. Logging: a failed POST logs at
+  debug, one `console.warn` when data is actually dropped (then a summary at most every 10 min), one
+  `console.info` on recovery. Before this, every non-2xx logged a warning and every failed batch was
+  lost.
+- **Fix: parallel telemetry POSTs shared one abort timer**, so one request finishing cleared the
+  other's deadline (it could then hang with no timeout). Each request now owns its timer, cleared
+  when it settles.
+- **Fix: a telemetry network error was an unhandled promise rejection.** It is now caught and
+  treated as retryable.
+- **Fix: `close()` left the telemetry timer armed when the final POST failed** (it rejected before
+  stopping timers). `close()` now stops polling and the telemetry timer first, sends the current
+  window once with a 2s deadline and `keepalive`, never rejects, and does not resend kept batches.
+- **`pagehide` replaces `beforeunload`** for the final flush: the live window is sent once with
+  `fetch(..., { keepalive: true })` and a 2s deadline without blocking unload. `close()` removes the
+  listener.
+- **Flush interval is now an option** (`telemetryFlushIntervalMs`, default 30s, unchanged).
+- **Memory cap:** evaluation-summary keys per window drop from 100,000 to 10,000
+  (`telemetryMaxEvaluationSummaries`), the uniform cap across SDKs; a key already in the window
+  keeps counting at the cap.
+- **New options:** `telemetryFlushIntervalMs`, `telemetryTimeoutMs`, `telemetryMaxRetainedBatches`,
+  `telemetryMaxRetainedBytes`, `telemetryMaxRetainedAgeMs`, `telemetryMaxEvaluationSummaries`.
+  Invalid values (non-finite or <= 0) fall back to the default.
+- `TelemetryUploader` (the `telemetryUploader` accessor) gains `send()`; `post()` keeps its behavior
+  with a per-request deadline, and `clearAbortTimeout()` is a deprecated no-op. No wire change, no
+  removed public API, no new dependencies.
+
 ## 1.2.1 - 2026-07-24
 
 - **Fix: eval-summary telemetry counters now report `reason` as the numeric wire code** (1=STATIC
