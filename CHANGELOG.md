@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: the `<script>`-tag bundle was never published (qfg-cna3).** `dist/quonfig.bundle.js` (which
+  sets `window.quonfig`) was only produced by the manual `bundle` script, so no published version
+  shipped it and `https://cdn.jsdelivr.net/npm/@quonfig/javascript@1/dist/quonfig.bundle.js`
+  returned 404. `npm run build` (used by `prepublishOnly` and the release workflow) now runs
+  `bundle` after `tsc`.
+
 ## 1.3.0 - 2026-09-25
 
 - **Telemetry transport policy (qfg-y8je.11).** Telemetry POSTs get their own 10s deadline
