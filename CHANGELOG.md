@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.1 - 2026-09-29
 
 - **Fix: the `<script>`-tag bundle was never published (qfg-cna3).** `dist/quonfig.bundle.js` (which
   sets `window.quonfig`) was only produced by the manual `bundle` script, so no published version
