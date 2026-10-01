@@ -46,7 +46,8 @@ export const massageSelectedValue = (config: Config): any => {
       return { json: config.rawValue.value };
     }
     if (config.type === "duration") {
-      return config.rawValue.value;
+      // A malformed duration is reported without its raw value.
+      return config.coercionError ? undefined : config.rawValue.value;
     }
   }
 

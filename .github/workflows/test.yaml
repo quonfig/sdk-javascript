@@ -15,20 +15,40 @@ jobs:
         node-version: ["20.9.0", "22", "24"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: sdk-javascript
+
+      # test/duration.test.js reads the shared duration grammar fixture
+      # (tests/duration/grammar.yaml) from a sibling integration-test-data
+      # checkout, the same layout as the monorepo. Pinned to a tag (not main)
+      # so a typo in shared YAML can't break every SDK's CI at once; it must
+      # be a tag that contains tests/duration/grammar.yaml.
+      # See integration-test-data/RELEASING.md.
+      - name: Checkout integration-test-data
+        uses: actions/checkout@v4
+        with:
+          repository: quonfig/integration-test-data
+          path: integration-test-data
+          ref: v2026.09.28
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
+          cache-dependency-path: sdk-javascript/package-lock.json
 
       - name: Install
+        working-directory: sdk-javascript
         run: npm ci
 
       - name: Build
+        working-directory: sdk-javascript
         run: npm run build
 
       - name: Run formatter
+        working-directory: sdk-javascript
         run: npm run prettier
 
       - name: Test
+        working-directory: sdk-javascript
         run: npm test

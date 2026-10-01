@@ -1,6 +1,6 @@
 import { v4 as uuid } from "uuid";
 
-import { Config } from "./config";
+import { Config, isDuration } from "./config";
 import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader, { type LoaderResult } from "./loader";
@@ -77,6 +77,20 @@ const buildFlagMetadata = (
     md.weightedValueIndex = weightedValueIndex;
   }
   return md;
+};
+
+/**
+ * Infer a Config type for a hydrated (flat, already-parsed) value, e.g. the
+ * output of extract(): a { ms, seconds } object is a duration, a string array
+ * a string_list, any other object json.
+ */
+const hydratedType = (value: unknown): string => {
+  if (typeof value === "boolean") return "bool";
+  if (typeof value === "number") return Number.isInteger(value) ? "int" : "double";
+  if (isDuration(value)) return "duration";
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return "string_list";
+  if (typeof value === "object" && value !== null) return "json";
+  return "string";
 };
 
 type PollStatus =
@@ -654,15 +668,7 @@ export class Quonfig {
     const configs: { [key: string]: Config } = { ...this._configs };
     Object.keys(flags).forEach((key) => {
       const value = flags[key] as ConfigValue;
-      const type =
-        typeof value === "boolean"
-          ? "bool"
-          : typeof value === "number"
-            ? Number.isInteger(value)
-              ? "int"
-              : "double"
-            : "string";
-      configs[key] = new Config(key, value, type);
+      configs[key] = new Config(key, value, hydratedType(value));
     });
     this._configs = configs;
     this.loaded = true;
@@ -753,6 +759,26 @@ export class Quonfig {
       };
     }
 
+    if (config.coercionError) {
+      if (!key.startsWith(LOG_LEVEL_KEY_PREFIX) && this._collectEvaluationSummaries) {
+        this.evaluationSummaryAggregator?.record(config);
+      }
+      return {
+        value: undefined,
+        reason: "ERROR",
+        errorCode: "TYPE_MISMATCH",
+        errorMessage: config.coercionError,
+        variant: "default",
+        flagMetadata: buildFlagMetadata(
+          config.configEvaluationMetadata?.configId,
+          config.configEvaluationMetadata?.configType,
+          undefined,
+          undefined,
+          "ERROR"
+        ),
+      };
+    }
+
     const md = config.configEvaluationMetadata;
     // Older api-delivery deployments don't emit `reason` on the wire; treat
     // their absence as STATIC so consumers see a sensible variant string.
@@ -794,18 +820,30 @@ export class Quonfig {
   getDuration(key: string): Duration | undefined {
     const value = this.get(key);
 
+    const coercionError = this.configs[key]?.coercionError;
+    if (coercionError) {
+      this.warnCoercionOnce(key, coercionError);
+      return undefined;
+    }
+
     if (!value) {
       return undefined;
     }
 
-    if (
-      !Object.prototype.hasOwnProperty.call(value, "seconds") ||
-      !Object.prototype.hasOwnProperty.call(value, "ms")
-    ) {
+    if (!isDuration(value)) {
       throw new Error(`Value for key "${key}" is not a duration`);
     }
 
-    return value as Duration;
+    return value;
+  }
+
+  private warnedCoercionKeys = new Set<string>();
+
+  /** One warning per key for a value that could not be coerced (never the raw value). */
+  private warnCoercionOnce(key: string, message: string): void {
+    if (this.warnedCoercionKeys.has(key)) return;
+    this.warnedCoercionKeys.add(key);
+    console.warn(`Quonfig warning: ${message}; returning the default.`);
   }
 
   /**

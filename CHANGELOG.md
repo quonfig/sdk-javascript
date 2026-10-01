@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: durations are parsed with the Quonfig grammar (qfg-2agi.14).** `getDuration` read only
+  `PT…` values and fell back to "first number = seconds", so valid stored values with a day
+  component were wrong (`P1D` and `P1DT6H2M1.5S` both returned 1 second) and invalid ones returned
+  plausible numbers (`P1W` -> 1s, `PT-5S` -> 5s, `5m` -> 5s). The parser now accepts exactly
+  `P[nD][T[nH][nM][n[.f]S]]` (fraction on seconds only, at most 9 digits, at most `P36500D`) with
+  exact millisecond rounding (half up), tested against the shared fixture
+  `integration-test-data/tests/duration/grammar.yaml`.
+- **A malformed duration returns the default.** A value outside the grammar, including an unresolved
+  provided (ENV_VAR) object, now makes `getDuration` return `undefined` with one `console.warn` per
+  key (without the raw value) instead of returning a wrong number or throwing. `getDetails` reports
+  `reason: "ERROR"`, `errorCode: "TYPE_MISMATCH"`, and evaluation telemetry no longer carries the
+  raw string. The unused `{definition, millis}` duration shape is no longer accepted.
+- **Fix: `hydrate()` types values by shape.** A `{ms, seconds}` object is hydrated as a `duration`,
+  a string array as `string_list` and any other object as `json` (previously all were typed
+  `string`), so `hydrate(extract())` round-trips durations.
+
 ## 1.3.1 - 2026-09-29
 
 - **Fix: the `<script>`-tag bundle was never published (qfg-cna3).** `dist/quonfig.bundle.js` (which
