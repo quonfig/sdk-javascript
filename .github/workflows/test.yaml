@@ -29,7 +29,7 @@ jobs:
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
-          ref: v2026.09.28
+          ref: v2026.10.03
 
       - uses: actions/setup-node@v4
         with:
