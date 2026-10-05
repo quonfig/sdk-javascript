@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.2 - 2026-10-05
 
 - **Fix: durations are parsed with the Quonfig grammar (qfg-2agi.14).** `getDuration` read only
   `PT…` values and fell back to "first number = seconds", so valid stored values with a day
