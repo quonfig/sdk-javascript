@@ -147,26 +147,51 @@ export class Config {
 
     if (!payload.evaluations) return configs;
 
+    // Decode per key: one malformed entry becomes a Config with
+    // `coercionError` set (value undefined, getDetails reports ERROR /
+    // TYPE_MISMATCH) instead of failing the whole payload, so the other
+    // configs still load. Matches sdk-go's skip-one-bad-config behavior.
     Object.keys(payload.evaluations).forEach((key) => {
       const evaluation: Evaluation = payload.evaluations[key];
-      const ev = evaluation.value;
-      const parsedValue = parseValue(ev, key);
-
-      const metadata: ConfigEvaluationMetadata = {
-        configRowIndex: evaluation.configRowIndex ?? 0,
-        conditionalValueIndex: evaluation.conditionalValueIndex ?? 0,
-        configType: evaluation.configType || "config",
-        configId: evaluation.configId || "",
-      };
-      if (evaluation.reason !== undefined) metadata.reason = evaluation.reason;
-      if (evaluation.ruleIndex !== undefined) metadata.ruleIndex = evaluation.ruleIndex;
-      if (evaluation.weightedValueIndex !== undefined) {
-        metadata.weightedValueIndex = evaluation.weightedValueIndex;
+      try {
+        configs[key] = Config.fromEvaluation(key, evaluation);
+      } catch (error) {
+        configs[key] = Config.undecodable(key, evaluation, error);
       }
-
-      configs[key] = new Config(key, parsedValue, ev.type, ev, metadata);
     });
 
     return configs;
+  }
+
+  private static metadataFor(evaluation: Evaluation): ConfigEvaluationMetadata {
+    const metadata: ConfigEvaluationMetadata = {
+      configRowIndex: evaluation.configRowIndex ?? 0,
+      conditionalValueIndex: evaluation.conditionalValueIndex ?? 0,
+      configType: evaluation.configType || "config",
+      configId: evaluation.configId || "",
+    };
+    if (evaluation.reason !== undefined) metadata.reason = evaluation.reason;
+    if (evaluation.ruleIndex !== undefined) metadata.ruleIndex = evaluation.ruleIndex;
+    if (evaluation.weightedValueIndex !== undefined) {
+      metadata.weightedValueIndex = evaluation.weightedValueIndex;
+    }
+    return metadata;
+  }
+
+  private static fromEvaluation(key: string, evaluation: Evaluation): Config {
+    const ev = evaluation.value;
+    const parsedValue = parseValue(ev, key);
+    return new Config(key, parsedValue, ev.type, ev, Config.metadataFor(evaluation));
+  }
+
+  /** A Config for an entry that could not be decoded. Never carries the raw value. */
+  private static undecodable(key: string, evaluation: unknown, error: unknown): Config {
+    const ev =
+      evaluation && typeof evaluation === "object" ? (evaluation as Evaluation) : undefined;
+    const type = typeof ev?.value?.type === "string" ? ev.value.type : "unknown";
+    const config = new Config(key, undefined, type, undefined, ev && Config.metadataFor(ev));
+    const reason = error instanceof Error ? error.message : String(error);
+    config.coercionError = `Value for key "${key}" could not be decoded: ${reason}`;
+    return config;
   }
 }

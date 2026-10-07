@@ -45,11 +45,13 @@ describe("Config.digest — json valueType", () => {
     expect(Array.isArray(configs["my.list"].value)).toBe(true);
   });
 
-  test("throws on stringified json — strict wire contract, matches sdk-go / sdk-python", () => {
+  test("rejects stringified json for that key only — strict wire contract, matches sdk-go / sdk-python", () => {
     // Server now always sends native. If a stringified value ever leaks
     // through, the SDK must reject it loudly — matches sdk-go (unmarshal
     // reject) and sdk-python (QuonfigValueTypeError). No silent
-    // pass-through or JSON.parse fallback.
+    // pass-through or JSON.parse fallback. The rejection is per key
+    // (qfg-goi1.2.6): the key gets no value and a coercionError, and the rest
+    // of the payload still decodes.
     const payload = {
       evaluations: {
         "legacy.str": {
@@ -61,7 +63,11 @@ describe("Config.digest — json valueType", () => {
       },
     };
 
-    expect(() => Config.digest(payload)).toThrow(/json value must be a native JSON type/);
+    const configs = Config.digest(payload);
+    expect(configs["legacy.str"].value).toBeUndefined();
+    expect(configs["legacy.str"].coercionError).toMatch(/json value must be a native JSON type/);
+    expect(configs["legacy.str"].coercionError).not.toContain("bar");
+    expect(configs["legacy.str"].configEvaluationMetadata.configId).toBe("cfg-3");
   });
 
   test("returns native scalar json values (number, bool, null)", () => {

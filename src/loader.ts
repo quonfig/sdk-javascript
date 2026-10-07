@@ -188,8 +188,10 @@ export default class Loader {
         pending += 1;
         this.fetchFromUrl(apiUrl)
           .then((result) => {
-            sawSuccess = true;
+            // sawSuccess only after onResult returns: a throwing install counts
+            // as a failed leg, so the load still settles (resolve or reject).
             onResult(result);
+            sawSuccess = true;
             if (!resolved) {
               resolved = true;
               resolve(); // first paint: unblock as soon as ANY leg succeeds
@@ -219,8 +221,8 @@ export default class Loader {
       pending += 1;
       this.fetchFromUrl(primaryUrl)
         .then((result) => {
-          sawSuccess = true;
           onResult(result);
+          sawSuccess = true;
           if (!resolved) {
             resolved = true;
             resolve();
