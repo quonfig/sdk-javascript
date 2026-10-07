@@ -291,8 +291,8 @@ export default class Loader {
     return new Promise<LoaderResult>((resolve, reject) => {
       // Leg-local abort + timeout: the hedge runs legs concurrently, so each
       // owns its own controller (registered in inFlight for supersede-abort)
-      // and its own timeout. A shared controller would let one leg's timeout
-      // abort the other.
+      // and its own timeout, both held until the body is parsed. A shared
+      // controller would let one leg's timeout abort the other.
       const controller = new AbortController();
       this.inFlight.add(controller);
       const { signal } = controller;
@@ -320,8 +320,6 @@ export default class Loader {
 
       fetch(url, { signal, headers: requestHeaders })
         .then((response) => {
-          cleanup();
-
           if (response.status === 304) {
             // Not modified. Return the payload cached for THIS url so the caller
             // always ends up with the current context's evaluations, even if its
@@ -370,9 +368,12 @@ export default class Loader {
           resolve({ notModified: false, payload });
         })
         .catch((error) => {
-          cleanup();
           reject(error);
-        });
+        })
+        // Clean up only once the body is parsed (or the leg failed): the
+        // timeout and the supersede-abort must cover the body read too, or a
+        // server that sends headers and then stalls hangs the load forever.
+        .finally(cleanup);
 
       timeoutId = setTimeout(() => {
         controller.abort();
