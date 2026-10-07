@@ -5,7 +5,7 @@ import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
 import Loader, { type LoaderResult } from "./loader";
 import { DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY } from "./apiHelpers";
-import { lkgKey, writeLkg } from "./lkgCache";
+import { writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
@@ -488,14 +488,14 @@ export class Quonfig {
         // A served-from-cache install (result.stale) is non-authoritative until
         // the network recovers; a fresh network install clears staleness AND
         // refreshes the last-known-good cache (spec 5h). We persist only what
-        // we just installed (post reject-older guard), so the per-context entry
-        // stays monotonic — an older live response is dropped by the guard
+        // we just installed (post reject-older guard), so the cached entry
+        // stays monotonic for its context — an older live response is dropped by the guard
         // before it reaches here, so "the watermark rule applies to the cache
         // too" holds without a separate check. A served-stale payload is
         // already in the cache, so it is not re-persisted.
         this._stale = result.stale === true;
         if (!result.stale && this.loader) {
-          writeLkg(lkgKey(this.loader.sdkKey, sig), {
+          writeLkg(this.loader.sdkKey, sig, {
             generation: this._heldGeneration,
             payload: result.payload,
           });

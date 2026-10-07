@@ -1,6 +1,6 @@
 import { headers, DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY, getDefaultApiUrls } from "./apiHelpers";
 import { encodeContexts } from "./context";
-import { lkgKey, readLkg } from "./lkgCache";
+import { readLkg } from "./lkgCache";
 import type { Contexts, EvaluationPayload, CollectContextMode } from "./types";
 
 export type LoaderParams = {
@@ -264,12 +264,12 @@ export default class Loader {
 
   /**
    * The last-known-good cache entry for the current (sdkKey, context), or
-   * undefined if there is none / localStorage is unavailable. Keyed
-   * host-agnostically so an entry persisted while talking to the primary is
-   * still served when both primary and secondary are unreachable.
+   * undefined if there is none / it holds another context / localStorage is
+   * unavailable. Host-agnostic, so an entry persisted while talking to the
+   * primary is still served when both primary and secondary are unreachable.
    */
   private readLastKnownGood() {
-    return readLkg(lkgKey(this.sdkKey, encodeContexts(this.contexts)));
+    return readLkg(this.sdkKey, encodeContexts(this.contexts));
   }
 
   /**
