@@ -110,6 +110,8 @@ export class Quonfig {
   private _pollCount = 0;
   private _pollStatus: PollStatus = { status: "not-started" };
   private _pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  // True while poll ticks are failing; gates the once-per-outage warning.
+  private _pollOutage = false;
   private _instanceHash: string = uuid();
   private _collectEvaluationSummaries = true;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
@@ -554,11 +556,29 @@ export class Quonfig {
 
   private doPolling({ frequencyInMs }: { frequencyInMs: number }) {
     this._pollTimeoutId = setTimeout(() => {
-      this.load().finally(() => {
-        if (this.pollStatus.status === "running") {
-          this.doPolling({ frequencyInMs });
-        }
-      });
+      this.load()
+        .then(() => {
+          this._pollOutage = false;
+        })
+        .catch((error) => {
+          // A failed tick (every leg failed, no last-known-good entry) must not
+          // become an unhandled rejection: Node exits on one, and browsers
+          // report each to error trackers at the poll frequency. The loop keeps
+          // the last good config and retries on the next tick. Warn once per
+          // outage, not once per tick.
+          if (!this._pollOutage) {
+            this._pollOutage = true;
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[quonfig] poll failed (${message}); keeping the current config and retrying every ${frequencyInMs}ms`
+            );
+          }
+        })
+        .finally(() => {
+          if (this.pollStatus.status === "running") {
+            this.doPolling({ frequencyInMs });
+          }
+        });
     }, frequencyInMs);
 
     this._pollStatus = { status: "running", frequencyInMs };
