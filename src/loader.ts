@@ -71,6 +71,12 @@ export default class Loader {
   private inFlight: Set<AbortController> = new Set();
 
   /**
+   * Makes the most recent {@link loadHedged} call inert. A newer call invokes
+   * it with its own promise; see `loadHedged` for what "inert" means.
+   */
+  private supersedeCurrent?: (next: Promise<void>) => void;
+
+  /**
    * Per-URL cache of {etag, payload} from prior 200 responses, keyed by the
    * FULL request URL (which embeds the encoded context). Keying per-URL —
    * rather than a single shared field like sdk-node — is the safety invariant:
@@ -145,16 +151,26 @@ export default class Loader {
    * running in the background and continue to feed `onResult`. It rejects only
    * if EVERY leg fails. A fast primary success suppresses the secondary entirely
    * (zero extra requests in the common case).
+   *
+   * A newer call supersedes this one (e.g. updateContext racing a refresh or a
+   * poll tick) and makes it inert: its legs are aborted, and a leg that still
+   * completes is ignored rather than passed to `onResult`, because it was
+   * requested for the old context and the caller would install it under the
+   * old context's signature. A superseded call fires no secondary leg (its
+   * aborted primary is not a primary failure), clears its hedge timer, never
+   * serves last-known-good, and settles with the call that replaced it.
    */
   loadHedged(onResult: (result: LoaderResult) => void): Promise<void> {
-    // Supersede any still-in-flight load (e.g. updateContext racing a poll tick):
-    // abort its legs so they can't install over this newer request.
+    const previous = this.supersedeCurrent;
+    // Abort the previous call's legs; `previous` below makes it inert before any
+    // abort rejection can reach its handlers.
     this.abortInFlight();
 
     const primaryUrl = this.apiUrls[0];
     const secondaryUrls = this.apiUrls.slice(1);
 
-    return new Promise<void>((resolve, reject) => {
+    const promise = new Promise<void>((resolve, reject) => {
+      let superseded = false;
       let pending = 0; // legs currently in flight
       let sawSuccess = false;
       let resolved = false;
@@ -188,6 +204,7 @@ export default class Loader {
         pending += 1;
         this.fetchFromUrl(apiUrl)
           .then((result) => {
+            if (superseded) return;
             // sawSuccess only after onResult returns: a throwing install counts
             // as a failed leg, so the load still settles (resolve or reject).
             onResult(result);
@@ -221,6 +238,7 @@ export default class Loader {
       pending += 1;
       this.fetchFromUrl(primaryUrl)
         .then((result) => {
+          if (superseded) return;
           onResult(result);
           sawSuccess = true;
           if (!resolved) {
@@ -251,7 +269,29 @@ export default class Loader {
       if (secondaryUrls.length > 0) {
         hedgeTimer = setTimeout(fireSecondaries, this.hedgeDelay);
       }
+
+      this.supersedeCurrent = (next) => {
+        superseded = true;
+        // No secondary leg, from the hedge timer or from the aborted primary's
+        // rejection (fireSecondaries is a no-op once this is false).
+        moreLegsPossible = false;
+        if (hedgeTimer) {
+          clearTimeout(hedgeTimer);
+          hedgeTimer = undefined;
+        }
+        // settle() is a no-op once resolved, so no last-known-good is served.
+        // A caller still awaiting this call (an updateContext that a poll tick
+        // or a newer updateContext replaced) settles with the replacement, so
+        // it does not resume before the current context's values install.
+        if (!resolved) {
+          resolved = true;
+          next.then(resolve, reject);
+        }
+      };
     });
+
+    previous?.(promise);
+    return promise;
   }
 
   /** Abort and forget every in-flight fetch leg. */
