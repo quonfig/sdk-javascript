@@ -1,18 +1,37 @@
 import type { Contexts, ContextValue } from "./types";
 
 /**
- * Base64 encode a string, works in both browser and Node.js environments.
+ * The UTF-8 bytes of `str` as a binary string (one char per byte), the input
+ * btoa expects. TextEncoder where it exists; otherwise the
+ * encodeURIComponent/unescape idiom, which every JS engine has (React Native
+ * without TextEncoder, older engines).
+ */
+const utf8BinaryString = (str: string): string => {
+  if (typeof TextEncoder !== "undefined") {
+    const bytes = new TextEncoder().encode(str);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return binary;
+  }
+  return unescape(encodeURIComponent(str));
+};
+
+/**
+ * Base64 encode a string as UTF-8, in any runtime. Feature-detects btoa
+ * (browsers, workers, React Native, Node >= 16) instead of checking for
+ * `window`, and always encodes to UTF-8 first, so non-Latin-1 text never
+ * throws or comes out as Latin-1. Falls back to Buffer.
  */
 export const base64Encode = (str: string): string => {
-  if (typeof window !== "undefined") {
-    if (typeof TextEncoder !== "undefined") {
-      const bytes = new TextEncoder().encode(str);
-      const binString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join("");
-      return btoa(binString);
-    }
-    return window.btoa(str);
+  if (typeof btoa === "function") {
+    return btoa(utf8BinaryString(str));
   }
-  return Buffer.from(str).toString("base64");
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(str, "utf8").toString("base64");
+  }
+  throw new Error("Quonfig: no base64 encoder available (needs btoa or Buffer)");
 };
 
 /**
