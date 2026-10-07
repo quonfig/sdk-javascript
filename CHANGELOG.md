@@ -1,5 +1,45 @@
 # Changelog
 
+## Unreleased
+
+Recommended release: 1.4.0 (minor). Two fixes change behavior on rare edges (a malformed value no
+longer fails the whole payload; accented or non-Latin context values are now UTF-8 in runtimes
+without `TextEncoder`). No common-path result changes (qfg-goi1.2.6).
+
+- **Fix: a failed poll tick is no longer an unhandled promise rejection.** During an outage with no
+  last-known-good entry, every tick rejected with no handler: Node exits on the first one, and
+  browsers report each to error trackers. The loop now keeps the current config, warns once per
+  outage, and keeps polling.
+- **Fix: one malformed evaluation no longer hangs `init()` or stops polling.** A bad entry (a `json`
+  value sent as a string, or a null value) made the whole payload fail inside the loader, which then
+  never settled. Each key is now decoded on its own: the bad key returns `undefined` and
+  `getDetails` reports `reason: "ERROR"`, `errorCode: "TYPE_MISMATCH"` (the same path as a malformed
+  duration), and the other keys load. A load also always settles if installing a result throws.
+- **Fix: the per-leg fetch `timeout` covers the response body.** It was cleared when headers
+  arrived, so a server that sent headers and then stalled hung the load with no deadline.
+- **Fix: `close()` or `stopPolling()` during the first `poll()` fetch no longer restarts polling.**
+  A second `poll()` call also no longer leaves two loops running.
+- **Fix: config keys that match `Object.prototype` names** (for example `constructor`) are no longer
+  found when absent; `getDetails` reports `FLAG_NOT_FOUND`.
+- **Fix: `base64Encode` (used for the context in the fetch URL) is UTF-8 in every runtime.** Without
+  `TextEncoder` (React Native) it produced Latin-1 for accented text and threw above U+00FF; without
+  `window` (Web/Service Workers, Cloudflare Workers) it threw. Output on modern browsers and Node is
+  unchanged.
+- **Fix: importing the SDK no longer requires `crypto.getRandomValues`.** The telemetry instance id
+  is created on first use and falls back to a non-cryptographic random id.
+- **Fix: the last-known-good cache keeps one entry per SDK key.** It stored one localStorage entry
+  per distinct context and never removed any, which could fill the origin's quota (breaking the
+  app's own `localStorage` writes) and kept the raw context in the key. The entry is now
+  `quonfig.lkg.v2:<sdkKey>` with a hash of the context, served only for the same context. Old
+  `quonfig.lkg.v1:<sdkKey>:*` entries are removed on the first write.
+- **Change: `shouldLog({loggerPath})` no longer adds `quonfig-sdk-logging` to the client context.**
+  It changed every later fetch's context, which let an older config generation replace a newer one
+  and changed the inputs to every flag. The browser evaluates server-side once per fetched context,
+  so the logger path never selected per-logger rules. Logger paths from the browser no longer appear
+  in example contexts.
+- **Packaging:** removed the `module` field (it named `dist/index.mjs`, which was never built;
+  bundlers fall back to `main`) and the `lint` script (eslint is not installed).
+
 ## 1.3.2 - 2026-10-05
 
 - **Fix: durations are parsed with the Quonfig grammar (qfg-2agi.14).** `getDuration` read only
