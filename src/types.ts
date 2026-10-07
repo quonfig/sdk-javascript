@@ -246,10 +246,9 @@ export type InitOptions = {
    *
    * When set (e.g. `"log-level.my-app"`), callers can invoke
    * `shouldLog({loggerPath: "com.myapp.Auth", desiredLevel: "DEBUG"})` and
-   * the SDK will evaluate the named config with the logger path injected
-   * as `contexts["quonfig-sdk-logging"] = { key: loggerPath }` for telemetry
-   * auto-capture. Using the `key` property means logger paths flow to the
-   * dashboard via the existing example-context telemetry machinery.
+   * the SDK evaluates the named config. The browser SDK evaluates
+   * server-side once per fetched context, so `loggerPath` does not change the
+   * answer and is not added to the client's context.
    *
    * Callers retain the escape hatch of passing `configKey` directly to
    * `shouldLog`.
@@ -257,7 +256,11 @@ export type InitOptions = {
   loggerKey?: string;
 };
 
-/** Context name under which the logger-path convenience injects the logger path. */
+/**
+ * Context name the server SDKs use for the logger path in `shouldLog`. The
+ * browser SDK no longer adds it to the client context (it evaluates
+ * server-side once per fetched context); kept for compatibility.
+ */
 export const QUONFIG_SDK_LOGGING_CONTEXT_NAME = "quonfig-sdk-logging";
 
 /**
@@ -279,10 +282,8 @@ export type ConfigEvaluationCounter = Omit<ConfigEvaluationMetadata, "configType
  *    log level. The caller is responsible for any per-logger routing.
  *
  * 2. `{loggerPath, ...}` — convenience shape. Requires `loggerKey` on init.
- *    The SDK uses `loggerKey` as the underlying config key and injects
- *    `contexts["quonfig-sdk-logging"] = { key: loggerPath }` so the logger
- *    path is recorded in telemetry (via the existing example-context
- *    machinery). `loggerPath` is passed through without normalization.
+ *    The SDK uses `loggerKey` as the underlying config key. `loggerPath` does
+ *    not change the client's context or what is fetched.
  */
 export type ShouldLogArgs =
   | { configKey: string; desiredLevel: string; defaultLevel: string }

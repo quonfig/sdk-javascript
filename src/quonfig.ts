@@ -26,7 +26,6 @@ import type {
   EvaluationReason,
   InitOptions,
 } from "./types";
-import { QUONFIG_SDK_LOGGING_CONTEXT_NAME } from "./types";
 
 /**
  * Build the OpenFeature `variant` string per the cross-SDK spec
@@ -912,11 +911,10 @@ export class Quonfig {
    *    log level. The caller is responsible for any per-logger routing.
    *
    * 2. `{loggerPath, ...}` — convenience shape. Requires `loggerKey` on
-   *    `init()`. The SDK uses `loggerKey` as the underlying config key and
-   *    injects `contexts["quonfig-sdk-logging"] = { key: loggerPath }` into
-   *    the live client contexts so the logger path is auto-captured by the
-   *    existing example-context telemetry. `loggerPath` is passed through
-   *    without normalization.
+   *    `init()`. The SDK uses `loggerKey` as the underlying config key.
+   *    `loggerPath` does not change the client's context or what is fetched:
+   *    the browser SDK evaluates server-side once per fetched context, so every
+   *    `loggerPath` gets the same answer from a given config.
    */
   shouldLog(args: { configKey: string; desiredLevel: string; defaultLevel: string }): boolean;
   shouldLog(args: { loggerPath: string; desiredLevel: string; defaultLevel?: string }): boolean;
@@ -941,24 +939,13 @@ export class Quonfig {
         );
       }
       resolvedConfigKey = this._loggerKey;
-
-      // Publish the logger path under the `quonfig-sdk-logging` context name
-      // using a `key` property. This matches the sdk-node/sdk-go/sdk-ruby
-      // shape exactly and is load-bearing for example-context telemetry
-      // auto-capture: the dashboard harvests contexts that carry a `key`, so
-      // logger paths flow through for free.
-      //
-      // Note: in the browser SDK, config evaluation happens server-side, so
-      // this does not influence the current request's rule evaluation. It
-      // does, however, make the injected context visible to telemetry and
-      // to any future `updateContext` / loader re-fetch.
-      this._contexts = {
-        ...this._contexts,
-        [QUONFIG_SDK_LOGGING_CONTEXT_NAME]: { key: args.loggerPath },
-      };
-      if (this.loader) {
-        this.loader.contexts = this._contexts;
-      }
+      // The logger path is deliberately NOT added to the live context (as
+      // `quonfig-sdk-logging`). Doing so changed every later fetch's context:
+      // the next load counted as a context switch, which skips the
+      // reject-older guard, so an older generation could replace a newer one,
+      // and it changed the inputs to every flag. The browser evaluates
+      // server-side once per fetched context, so the path could not select
+      // per-logger rules anyway.
     } else if (args.configKey !== undefined) {
       resolvedConfigKey = args.configKey;
     } else {

@@ -14,7 +14,7 @@ function buildClient({ hydratedFlags, loggerKey }) {
 }
 
 describe("shouldLog({loggerPath}) convenience", () => {
-  test("uses loggerKey as the config key and passes loggerPath through unnormalized to contexts", () => {
+  test("uses loggerKey as the config key and leaves the client contexts unchanged", () => {
     const q = buildClient({
       loggerKey: "log-level.my-app",
       hydratedFlags: { "log-level.my-app": "DEBUG" },
@@ -26,18 +26,12 @@ describe("shouldLog({loggerPath}) convenience", () => {
     // trace is MORE verbose than debug -> should NOT emit.
     expect(q.shouldLog({ loggerPath: "MyApp::Services::Auth", desiredLevel: "trace" })).toBe(false);
 
-    // The loggerPath is published as-is (no snake_case, no dot-ification) under
-    // the load-bearing "quonfig-sdk-logging" context name with nested `key`.
-    expect(q.contexts[QUONFIG_SDK_LOGGING_CONTEXT_NAME]).toEqual({
-      key: "MyApp::Services::Auth",
-    });
-
-    // A second call with a different logger path updates the injected context
-    // so telemetry auto-capture tracks per-logger usage.
+    // The loggerPath is NOT injected into the client contexts (qfg-goi1.2.6):
+    // the browser fetches with its context, so injecting it changed every later
+    // fetch and bypassed the reject-older guard.
+    expect(q.contexts[QUONFIG_SDK_LOGGING_CONTEXT_NAME]).toBeUndefined();
     q.shouldLog({ loggerPath: "other.dotted.name", desiredLevel: "info" });
-    expect(q.contexts[QUONFIG_SDK_LOGGING_CONTEXT_NAME]).toEqual({
-      key: "other.dotted.name",
-    });
+    expect(q.contexts).toEqual({});
   });
 
   test("respects the configured log level for the loggerKey", () => {
