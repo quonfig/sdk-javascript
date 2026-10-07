@@ -112,6 +112,10 @@ export class Quonfig {
   private _pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
   // True while poll ticks are failing; gates the once-per-outage warning.
   private _pollOutage = false;
+  // Bumped by every stopPolling() (and so every poll()). A poll loop keeps
+  // rescheduling only while its generation is current, so a stop or a newer
+  // poll() during an in-flight fetch can't leave a second, unstoppable loop.
+  private _pollGeneration = 0;
   private _instanceHash: string = uuid();
   private _collectEvaluationSummaries = true;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
@@ -534,6 +538,8 @@ export class Quonfig {
 
     this.stopPolling();
     this._pollStatus = { status: "pending" };
+    // stopPolling() bumped the generation; this poll() owns the new one.
+    const generation = this._pollGeneration;
 
     const sig = encodeContexts(this._contexts);
     return this.loader
@@ -550,11 +556,17 @@ export class Quonfig {
         // self-heal on the next tick. `doPolling`'s own loop is already resilient
         // this way; the bootstrap must match it. (The legacy ReforgeHQ SDK
         // scheduled here too; the Quonfig port regressed it into the `.then`.)
-        this.doPolling({ frequencyInMs });
+        //
+        // Only if this poll() is still current: a close()/stopPolling() or a
+        // newer poll() while the first fetch was in flight bumped the
+        // generation, and restarting here would leak a loop nothing can stop.
+        if (generation === this._pollGeneration && this._pollStatus.status === "pending") {
+          this.doPolling({ frequencyInMs }, generation);
+        }
       });
   }
 
-  private doPolling({ frequencyInMs }: { frequencyInMs: number }) {
+  private doPolling({ frequencyInMs }: { frequencyInMs: number }, generation: number) {
     this._pollTimeoutId = setTimeout(() => {
       this.load()
         .then(() => {
@@ -575,8 +587,8 @@ export class Quonfig {
           }
         })
         .finally(() => {
-          if (this.pollStatus.status === "running") {
-            this.doPolling({ frequencyInMs });
+          if (generation === this._pollGeneration && this.pollStatus.status === "running") {
+            this.doPolling({ frequencyInMs }, generation);
           }
         });
     }, frequencyInMs);
@@ -588,6 +600,7 @@ export class Quonfig {
    * Stop polling for config updates.
    */
   stopPolling(): void {
+    this._pollGeneration += 1;
     if (this.pollTimeoutId) {
       clearTimeout(this.pollTimeoutId);
       this._pollTimeoutId = undefined;
