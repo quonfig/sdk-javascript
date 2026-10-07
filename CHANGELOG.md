@@ -24,6 +24,14 @@ without `TextEncoder`). No common-path result changes (qfg-goi1.2.6).
   failure and fired the secondary leg, and its hedge timer kept running. A replaced load now does
   nothing: no install, no secondary leg, no last-known-good, and its promise settles with the load
   that replaced it instead of rejecting with the abort.
+- **Fix: `updateContext(ctx, true)` followed by `poll()` installs the new context's values
+  (qfg-goi1.2.48, minor).** `skipLoad` changed the context but not the one the loader fetched for,
+  and `poll()` did not sync it, so the first poll fetch was for the previous context and was
+  installed, and written to the last-known-good cache, as the new one's. At the same generation the
+  later, correct fetches were dropped as "not newer", so user B saw user A's flags until the next
+  publish, and an offline reload for B served A's values as stale. `poll()` and
+  `updateContext(ctx, true)` now point the loader at the current context, and every leg of a load
+  (and its last-known-good fallback) is for the context the load started with.
 - **Fix: `close()` or `stopPolling()` during the first `poll()` fetch no longer restarts polling.**
   A second `poll()` call also no longer leaves two loops running.
 - **Fix: config keys that match `Object.prototype` names** (for example `constructor`) are no longer
