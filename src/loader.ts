@@ -116,8 +116,8 @@ export default class Loader {
     this.clientVersion = clientVersion;
   }
 
-  url(apiUrl: string): string {
-    const encodedContext = encodeContexts(this.contexts);
+  url(apiUrl: string, contexts: Contexts = this.contexts): string {
+    const encodedContext = encodeContexts(contexts);
     return `${apiUrl}/api/v2/configs/eval-with-context/${encodedContext}?collectContextMode=${this.collectContextMode}`;
   }
 
@@ -168,6 +168,11 @@ export default class Loader {
 
     const primaryUrl = this.apiUrls[0];
     const secondaryUrls = this.apiUrls.slice(1);
+    // Every leg and the last-known-good fallback of this call are for the
+    // context it was started with. `contexts` can change while it is in flight
+    // (updateContext with skipLoad), and the caller installs this call's results
+    // under the signature it captured at the same moment (qfg-goi1.2.48).
+    const contexts = this.contexts;
 
     const promise = new Promise<void>((resolve, reject) => {
       let superseded = false;
@@ -189,7 +194,7 @@ export default class Loader {
         // gets their last config marked stale instead of an init throw. The
         // caller drains it through the reject-older guard, so it can never
         // regress an established client. Absent a cache entry, reject as before.
-        const cached = this.readLastKnownGood();
+        const cached = this.readLastKnownGood(contexts);
         if (cached) {
           resolved = true;
           onResult({ notModified: false, payload: cached.payload, stale: true });
@@ -202,7 +207,7 @@ export default class Loader {
 
       const startLeg = (apiUrl: string) => {
         pending += 1;
-        this.fetchFromUrl(apiUrl)
+        this.fetchFromUrl(apiUrl, contexts)
           .then((result) => {
             if (superseded) return;
             // sawSuccess only after onResult returns: a throwing install counts
@@ -236,7 +241,7 @@ export default class Loader {
 
       // Primary leg.
       pending += 1;
-      this.fetchFromUrl(primaryUrl)
+      this.fetchFromUrl(primaryUrl, contexts)
         .then((result) => {
           if (superseded) return;
           onResult(result);
@@ -303,13 +308,13 @@ export default class Loader {
   }
 
   /**
-   * The last-known-good cache entry for the current (sdkKey, context), or
+   * The last-known-good cache entry for (sdkKey, `contexts`), or
    * undefined if there is none / it holds another context / localStorage is
    * unavailable. Host-agnostic, so an entry persisted while talking to the
    * primary is still served when both primary and secondary are unreachable.
    */
-  private readLastKnownGood() {
-    return readLkg(this.sdkKey, encodeContexts(this.contexts));
+  private readLastKnownGood(contexts: Contexts) {
+    return readLkg(this.sdkKey, encodeContexts(contexts));
   }
 
   /**
@@ -327,7 +332,7 @@ export default class Loader {
     }
   }
 
-  private fetchFromUrl(apiUrl: string): Promise<LoaderResult> {
+  private fetchFromUrl(apiUrl: string, contexts: Contexts): Promise<LoaderResult> {
     return new Promise<LoaderResult>((resolve, reject) => {
       // Leg-local abort + timeout: the hedge runs legs concurrently, so each
       // owns its own controller (registered in inFlight for supersede-abort)
@@ -342,7 +347,7 @@ export default class Loader {
         this.inFlight.delete(controller);
       };
 
-      const url = this.url(apiUrl);
+      const url = this.url(apiUrl, contexts);
 
       // Conditional request: if we have a cached {etag, payload} from a prior
       // 200 for THIS exact URL, ask the server to revalidate. A 304 means both
