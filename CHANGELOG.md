@@ -17,6 +17,13 @@ without `TextEncoder`). No common-path result changes (qfg-goi1.2.6).
   duration), and the other keys load. A load also always settles if installing a result throws.
 - **Fix: the per-leg fetch `timeout` covers the response body.** It was cleared when headers
   arrived, so a server that sent headers and then stalled hung the load with no deadline.
+- **Fix: a load replaced by `updateContext()` can no longer install the previous context's values
+  (qfg-goi1.2.7, patch).** When `updateContext()` raced an in-flight refresh or poll tick, a leg of
+  the older load that still completed was installed under the old context, so the client could serve
+  user A's flags while `contexts` said user B. The aborted older load also counted as a primary
+  failure and fired the secondary leg, and its hedge timer kept running. A replaced load now does
+  nothing: no install, no secondary leg, no last-known-good, and its promise settles with the load
+  that replaced it instead of rejecting with the abort.
 - **Fix: `close()` or `stopPolling()` during the first `poll()` fetch no longer restarts polling.**
   A second `poll()` call also no longer leaves two loops running.
 - **Fix: config keys that match `Object.prototype` names** (for example `constructor`) are no longer
