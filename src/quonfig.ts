@@ -93,6 +93,24 @@ const hydratedType = (value: unknown): string => {
   return "string";
 };
 
+/**
+ * A per-instance id for telemetry dedupe. uuid() needs
+ * crypto.getRandomValues, which some runtimes lack (React Native without its
+ * polyfill, some embedded webviews); this id needs no cryptographic strength,
+ * so fall back to Math.random rather than throw. crypto.randomUUID is not an
+ * option: it is undefined on insecure (plain http) pages.
+ */
+const newInstanceHash = (): string => {
+  try {
+    return uuid();
+  } catch {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = Math.floor(Math.random() * 16);
+      return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+    });
+  }
+};
+
 type PollStatus =
   | { status: "not-started" }
   | { status: "pending" }
@@ -117,7 +135,9 @@ export class Quonfig {
   // rescheduling only while its generation is current, so a stop or a newer
   // poll() during an in-flight fetch can't leave a second, unstoppable loop.
   private _pollGeneration = 0;
-  private _instanceHash: string = uuid();
+  // Created on first read, not at construction: the module-level singleton
+  // would otherwise call uuid() at import time (see newInstanceHash).
+  private _instanceHash: string | undefined;
   private _collectEvaluationSummaries = true;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
   private telemetryReporter: TelemetryReporter | undefined;
@@ -308,6 +328,9 @@ export class Quonfig {
   }
 
   get instanceHash(): string {
+    if (this._instanceHash === undefined) {
+      this._instanceHash = newInstanceHash();
+    }
     return this._instanceHash;
   }
 
