@@ -140,10 +140,11 @@ export class Config {
   static digest(payload: EvaluationPayload): { [key: string]: Config } {
     if (payload === undefined) {
       console.trace("Config.digest called with undefined payload");
-      return {};
+      return Object.create(null);
     }
 
-    const configs: { [key: string]: Config } = {};
+    // No prototype: a key like "constructor" must not resolve to Object.prototype.
+    const configs: { [key: string]: Config } = Object.create(null);
 
     if (!payload.evaluations) return configs;
 

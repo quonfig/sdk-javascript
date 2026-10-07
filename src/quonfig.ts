@@ -105,7 +105,8 @@ export interface QuonfigBootstrap {
 }
 
 export class Quonfig {
-  private _configs: { [key: string]: Config } = {};
+  // No prototype: a key like "constructor" must not resolve to Object.prototype.
+  private _configs: { [key: string]: Config } = Object.create(null);
   private _telemetryUploader: TelemetryUploader | undefined;
   private _pollCount = 0;
   private _pollStatus: PollStatus = { status: "not-started" };
@@ -698,7 +699,7 @@ export class Quonfig {
    * Flags are flat key-value pairs: { flagKey: value }.
    */
   hydrate(flags: Record<string, unknown>): void {
-    const configs: { [key: string]: Config } = { ...this._configs };
+    const configs: { [key: string]: Config } = Object.assign(Object.create(null), this._configs);
     Object.keys(flags).forEach((key) => {
       const value = flags[key] as ConfigValue;
       configs[key] = new Config(key, value, hydratedType(value));
