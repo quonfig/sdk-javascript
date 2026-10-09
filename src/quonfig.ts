@@ -545,6 +545,12 @@ export class Quonfig {
     this._contexts = context;
 
     if (skipLoad) {
+      // No fetch now, but the next one (a poll() or poll tick) must be for this
+      // context: poll() installs under the signature of `_contexts`, so a loader
+      // still holding the previous context would fetch that user's values and
+      // install (and persist) them as this one's (qfg-goi1.2.48). A load already
+      // in flight is unaffected: it finishes for the context it was started for.
+      this.loader.contexts = context;
       return;
     }
 
@@ -564,6 +570,8 @@ export class Quonfig {
     // stopPolling() bumped the generation; this poll() owns the new one.
     const generation = this._pollGeneration;
 
+    // Fetch for the context we install under, as load() does (qfg-goi1.2.48).
+    this.loader.contexts = this._contexts;
     const sig = encodeContexts(this._contexts);
     return this.loader
       .loadHedged((result) => {
