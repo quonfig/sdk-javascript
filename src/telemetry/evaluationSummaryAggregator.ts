@@ -14,6 +14,10 @@ const REASON_WIRE_CODES: Record<EvaluationReason, number> = {
   ERROR: 5,
 };
 
+// Separates the "key,type" summary prefix from the per-value counter identity
+// in an aggregator map key.
+const COUNTER_SEP = "\u0000";
+
 type ConfigEvaluationSummary = {
   key: string;
   type: string;
@@ -83,8 +87,8 @@ export const massageConfigForTelemetry = (
  * Collects evaluation summaries for the live telemetry window. The reporter
  * (./reporter.ts) owns the tick timer and drains this once per tick.
  *
- * Bounded (P6): at most `maxKeys` distinct (key, configType) pairs per
- * window; a new key beyond the cap is not recorded (drop newest), while keys
+ * Bounded (P6): at most `maxKeys` distinct counters per window; a new
+ * counter beyond the cap is not recorded (drop newest), while counters
  * already in the window keep counting.
  */
 export class EvaluationSummaryAggregator {
@@ -103,12 +107,18 @@ export class EvaluationSummaryAggregator {
     if (!this.enabled || !config?.configEvaluationMetadata) return;
 
     const { configType, ...metadata } = config.configEvaluationMetadata;
-    const key = `${config.key},${configType}`;
+    // One counter per evaluated value, as sdk-go keys them (config id + rule
+    // + weighted value + selected value; ITD telemetry.yaml): a flag whose
+    // value or rule changes mid-window gets a new counter instead of being
+    // counted under the first one seen (qfg-goi1.10.12). The leading
+    // "key,type" is what buildSummaries groups on.
+    const fresh = massageConfigForTelemetry(config, metadata);
+    const key = `${config.key},${configType}${COUNTER_SEP}${JSON.stringify(fresh)}`;
 
     let counter = this.data.get(key);
     if (!counter) {
       if (this.data.size >= this.maxKeys) return;
-      counter = massageConfigForTelemetry(config, metadata);
+      counter = fresh;
       this.data.set(key, counter);
     }
     counter.count += 1;
@@ -144,16 +154,18 @@ export class EvaluationSummaryAggregator {
   private static buildSummaries(
     data: Map<string, ConfigEvaluationCounter>
   ): ConfigEvaluationSummary[] {
-    return Array.from(data).map((entry: [string, ConfigEvaluationCounter]) => {
-      const [configKey, configType] = entry[0].split(",");
-      const counter = entry[1];
-
-      return {
-        key: configKey,
-        type: configType,
-        counters: [counter],
-      };
+    const grouped = new Map<string, ConfigEvaluationSummary>();
+    data.forEach((counter, mapKey) => {
+      const summaryKey = mapKey.split(COUNTER_SEP)[0];
+      let summary = grouped.get(summaryKey);
+      if (!summary) {
+        const [configKey, configType] = summaryKey.split(",");
+        summary = { key: configKey, type: configType, counters: [] };
+        grouped.set(summaryKey, summary);
+      }
+      summary.counters.push(counter);
     });
+    return Array.from(grouped.values());
   }
 
   private buildEvents(summaries: ConfigEvaluationSummaries): TelemetryEvents {
