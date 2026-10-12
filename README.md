@@ -19,11 +19,30 @@ await quonfig.init({
   context: { user: { key: "user-123" } },
 });
 
+// init() fetches once. Start polling to pick up flag changes. poll()'s promise
+// rejects if its first fetch fails, but the loop keeps running and retrying.
+quonfig.poll({ frequencyInMs: 60_000 }).catch(() => {});
+
 if (quonfig.isEnabled("my-flag")) {
   // ...
 }
 
 const color = quonfig.get("button-color");
+```
+
+`init()` rejects when every API URL fails and this browser has no last-known-good copy for the
+context. With a last-known-good copy it resolves instead and serves those values marked stale
+(`quonfig.stale` is `true`, `getDetails()` reports reason `STALE`) until a fetch succeeds. After a
+rejection, `get()` returns `undefined` and `isEnabled()` returns `false`, so wrap `init()` in
+`try`/`catch` and still call `poll()` if you want the client to recover when the network comes back:
+
+```js
+try {
+  await quonfig.init({ sdkKey: "your-frontend-sdk-key", context });
+} catch (error) {
+  console.warn("Quonfig init failed; serving defaults until a poll succeeds", error);
+}
+quonfig.poll({ frequencyInMs: 60_000 }).catch(() => {});
 ```
 
 ## Failover & `QUONFIG_DOMAIN`

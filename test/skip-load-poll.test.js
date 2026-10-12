@@ -97,7 +97,7 @@ describe("updateContext(ctx, true) then poll()", () => {
     );
   });
 
-  test("a load in flight when skipLoad switches the context finishes for the context it was started for", async () => {
+  test("a load in flight when skipLoad switches the context fetches only the context it was started for", async () => {
     // The primary for alice is slow, so the hedge fires the secondary after
     // updateContext(bob, true) has run. Both legs of that load belong to alice:
     // the secondary must not fetch bob and report it under alice's signature.
@@ -122,7 +122,10 @@ describe("updateContext(ctx, true) then poll()", () => {
     await sleep(200);
 
     expect(fetched).toEqual(["primary:alice", "secondary:alice"]);
-    expect(q.get("greeting")).toBe("hello alice");
+    // alice's result lands after the client switched to bob, so it is dropped
+    // rather than served under bob (qfg-goi1.10.12: install only for the
+    // current context). The next fetch for bob fills it.
+    expect(q.get("greeting")).toBeUndefined();
     expect(readLkg(SDK_KEY, encodeContexts(BOB))).toBeUndefined();
   });
 });

@@ -479,7 +479,22 @@ export class Quonfig {
    *      strand `updateContext` on the held generation).
    */
   private applyLoaderResult(result: LoaderResult, sig: string): void {
+    // Install only for the context the client holds NOW. Two overlapping
+    // init() calls each build their own Loader, so the superseded-load guard
+    // (qfg-goi1.2.7) does not cover them: the older init's response can land
+    // last, and without this check it would install the previous context's
+    // values under the newer context (qfg-goi1.10.12). The newer context wins.
+    // shouldLog({loggerPath}) no longer mutates `_contexts` (5cb87f5), so this
+    // cannot discard init's own result.
+    if (sig !== encodeContexts(this._contexts)) return;
+
     const contextChanged = this._loadedContextSig !== sig;
+    if (!contextChanged && !result.stale) {
+      // A live network answer for the held context (a 304, or an equal-or-older
+      // generation the guard below declines) still proves the network is back,
+      // so the served config is no longer stale (qfg-goi1.10.12).
+      this._stale = false;
+    }
     if (!result.notModified || contextChanged) {
       if (contextChanged || this.shouldInstall(result.payload)) {
         this.setConfig(result.payload);
@@ -549,7 +564,8 @@ export class Quonfig {
       // context: poll() installs under the signature of `_contexts`, so a loader
       // still holding the previous context would fetch that user's values and
       // install (and persist) them as this one's (qfg-goi1.2.48). A load already
-      // in flight is unaffected: it finishes for the context it was started for.
+      // in flight for the previous context is dropped when it lands, since
+      // applyLoaderResult installs only for the current context.
       this.loader.contexts = context;
       return;
     }

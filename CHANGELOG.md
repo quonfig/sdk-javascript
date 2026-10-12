@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+Patch release.
+
+- **Fix: overlapping `init()` calls install only the newer context (qfg-goi1.10.12).** Each `init()`
+  builds its own loader, so when an older `init()`'s response landed after a newer one's, the client
+  installed the older context's values while `contexts` said the newer one. A result now installs
+  only if it was fetched for the client's current context. This also covers a load still in flight
+  when `updateContext(ctx, true)` switches the context: its result is dropped instead of served
+  under the new context.
+- **Fix: `stale` clears when the network recovers at the same generation.** A client serving its
+  last-known-good copy stayed `stale` (reason `STALE`) after a later fetch succeeded with the same
+  generation, because only an install cleared it. Any live response for the held context now does.
+- **Fix: eval-summary telemetry keeps a counter per evaluated value.** Counters were keyed by config
+  key and type, so when a flag's value or rule changed mid-window every evaluation was counted under
+  the first value seen. Counters are now keyed by config id, rule, weighted value and selected
+  value, as the other SDKs do. `@quonfig/react` and `@quonfig/react-native` inherit the fix.
+- **Docs: the README shows `poll()` after `init()` and what happens when `init()` rejects.**
+
 ## 1.4.0 - 2026-10-09
 
 - **Fix: a failed poll tick is no longer an unhandled promise rejection.** During an outage with no
