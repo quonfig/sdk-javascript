@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1 - 2026-10-16
 
 - **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** 1.5.0
   keyed each per-value counter by `JSON.stringify` of the selected value on every `get()`, so a 60KB
