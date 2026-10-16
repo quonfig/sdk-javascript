@@ -45,6 +45,16 @@ try {
 quonfig.poll({ frequencyInMs: 60_000 }).catch(() => {});
 ```
 
+### Invalid or revoked SDK key
+
+When a poll fails on every leg and the primary answers 401, 403, 404 or 410, the SDK logs one
+`console.error` ("config fetch rejected: the SDK key is invalid or revoked") naming the status and
+host, never the key. It keeps serving the current config and slows polling to one fetch every
+150-300s (or `frequencyInMs`, if longer) for as long as the page lives. The first 200 or 304 on any
+leg logs one `console.info` and polling returns to `frequencyInMs`. `init()` and `updateContext()`
+never trigger this; only poll ticks do. A primary 5xx with a secondary 401 is treated as a transient
+failure.
+
 ## Failover & `QUONFIG_DOMAIN`
 
 By default the SDK derives its URLs from a single domain (default `quonfig.com`) and ships a primary

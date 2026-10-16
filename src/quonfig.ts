@@ -3,7 +3,7 @@ import { v4 as uuid } from "uuid";
 import { Config, isDuration } from "./config";
 import { contextsEqual, encodeContexts, validateContexts } from "./context";
 import { EvaluationSummaryAggregator } from "./telemetry/evaluationSummaryAggregator";
-import Loader, { type LoaderResult } from "./loader";
+import Loader, { type AuthRejection, type LoaderResult } from "./loader";
 import { DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY } from "./apiHelpers";
 import { writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
@@ -110,6 +110,13 @@ const newInstanceHash = (): string => {
   }
 };
 
+// While auth-failed, each poll waits max(T, frequencyInMs) with T uniform in
+// [150s, 300s], re-drawn every time (plan 2026-10-07-sdk-auth-failure-rule R3).
+const AUTH_PROBE_MIN_MS = 150_000;
+const AUTH_PROBE_SPAN_MS = 150_000;
+const authProbeWaitMs = (): number =>
+  AUTH_PROBE_MIN_MS + Math.floor(Math.random() * AUTH_PROBE_SPAN_MS);
+
 type PollStatus =
   | { status: "not-started" }
   | { status: "pending" }
@@ -130,6 +137,10 @@ export class Quonfig {
   private _pollTimeoutId: ReturnType<typeof setTimeout> | undefined;
   // True while poll ticks are failing; gates the once-per-outage warning.
   private _pollOutage = false;
+  // True after a poll cycle in which every leg failed and the primary answered
+  // 401/403/404/410 (auth-failed). Polls then slow to max(T, frequencyInMs)
+  // until a 200/304 on any leg. Kept across stopPolling()/poll().
+  private _authFailed = false;
   // Bumped by every stopPolling() (and so every poll()). A poll loop keeps
   // rescheduling only while its generation is current, so a stop or a newer
   // poll() during an in-flight fetch can't leave a second, unstoppable loop.
@@ -413,7 +424,10 @@ export class Quonfig {
   /**
    * Internal: load configs from server.
    */
-  private async load(): Promise<void> {
+  private async load(
+    onAuthRejected?: (rejection: AuthRejection) => void,
+    onNetworkResult?: () => void
+  ): Promise<void> {
     if (!this.loader) {
       throw new Error("Quonfig not initialized. Call init() first.");
     }
@@ -449,7 +463,8 @@ export class Quonfig {
     return this.loader
       .loadHedged((result) => {
         this.applyLoaderResult(result, sig);
-      })
+        if (!result.stale) onNetworkResult?.();
+      }, onAuthRejected)
       .finally(() => {
         if (this.pollStatus.status === "running") {
           this._pollCount += 1;
@@ -589,37 +604,102 @@ export class Quonfig {
     // Fetch for the context we install under, as load() does (qfg-goi1.2.48).
     this.loader.contexts = this._contexts;
     const sig = encodeContexts(this._contexts);
-    return this.loader
-      .loadHedged((result) => {
+    const loader = this.loader;
+    // The first poll fetch is a poll cycle: it can enter or leave auth-failed.
+    return this.pollCycle(frequencyInMs, (onAuthRejected, onNetworkResult) =>
+      loader.loadHedged((result) => {
         // First poll fetch. Same guarded, hedged install path as load() — see
         // applyLoaderResult for the 304/context-switch and reject-older rules.
         this.applyLoaderResult(result, sig);
-      })
-      .finally(() => {
-        // Schedule the recurring loop REGARDLESS of the first fetch's outcome
-        // (qfg-8uw5). If the bootstrap fetch rejects — a startup network blip
-        // with both primary and secondary briefly unreachable — `.then` never
-        // runs, so scheduling here is the only thing that lets polling start and
-        // self-heal on the next tick. `doPolling`'s own loop is already resilient
-        // this way; the bootstrap must match it. (The legacy ReforgeHQ SDK
-        // scheduled here too; the Quonfig port regressed it into the `.then`.)
-        //
-        // Only if this poll() is still current: a close()/stopPolling() or a
-        // newer poll() while the first fetch was in flight bumped the
-        // generation, and restarting here would leak a loop nothing can stop.
-        if (generation === this._pollGeneration && this._pollStatus.status === "pending") {
-          this.doPolling({ frequencyInMs }, generation);
+        if (!result.stale) onNetworkResult();
+      }, onAuthRejected)
+    ).finally(() => {
+      // Schedule the recurring loop REGARDLESS of the first fetch's outcome
+      // (qfg-8uw5). If the bootstrap fetch rejects — a startup network blip
+      // with both primary and secondary briefly unreachable — `.then` never
+      // runs, so scheduling here is the only thing that lets polling start and
+      // self-heal on the next tick. `doPolling`'s own loop is already resilient
+      // this way; the bootstrap must match it. (The legacy ReforgeHQ SDK
+      // scheduled here too; the Quonfig port regressed it into the `.then`.)
+      //
+      // Only if this poll() is still current: a close()/stopPolling() or a
+      // newer poll() while the first fetch was in flight bumped the
+      // generation, and restarting here would leak a loop nothing can stop.
+      if (generation === this._pollGeneration && this._pollStatus.status === "pending") {
+        this.doPolling({ frequencyInMs }, generation);
+      }
+    });
+  }
+
+  /**
+   * Run one poll cycle and apply the auth-failure rule to its outcome (plan
+   * 2026-10-07-sdk-auth-failure-rule R2, R4, R5). `run` performs the hedged
+   * fetch; it reports an auth rejection (every leg failed, primary
+   * 401/403/404/410) and every live 200/304 it installs or confirms. The
+   * returned promise settles as `run`'s does.
+   */
+  private pollCycle(
+    frequencyInMs: number,
+    run: (
+      onAuthRejected: (rejection: AuthRejection) => void,
+      onNetworkResult: () => void
+    ) => Promise<void>
+  ): Promise<void> {
+    let rejection: AuthRejection | undefined;
+    let accepted = false;
+    const after = () => {
+      if (rejection) {
+        if (!this._authFailed) {
+          this._authFailed = true;
+          console.error(
+            `[quonfig] config fetch rejected: the SDK key is invalid or revoked (check the SDK key) ` +
+              `status=${rejection.status} host=${rejection.host}; keeping the current config and ` +
+              `polling once every ${AUTH_PROBE_MIN_MS / 1000}-${(AUTH_PROBE_MIN_MS + AUTH_PROBE_SPAN_MS) / 1000}s ` +
+              `(or every ${frequencyInMs}ms if longer) until a fetch succeeds`
+          );
+        } else {
+          console.debug(
+            `[quonfig] auth-failed probe rejected (status=${rejection.status} host=${rejection.host})`
+          );
         }
-      });
+      } else if (this._authFailed) {
+        if (accepted) {
+          this._authFailed = false;
+          console.info(
+            `[quonfig] config fetch accepted; leaving auth-failed and resuming polling every ${frequencyInMs}ms`
+          );
+        } else {
+          console.debug("[quonfig] auth-failed probe failed; still auth-failed");
+        }
+      }
+    };
+    return run(
+      (r) => {
+        rejection = r;
+      },
+      () => {
+        accepted = true;
+      }
+    ).then(after, (error) => {
+      after();
+      throw error;
+    });
   }
 
   private doPolling({ frequencyInMs }: { frequencyInMs: number }, generation: number) {
+    // While auth-failed the next poll waits max(T, frequencyInMs) (R3).
+    const waitMs = this._authFailed ? Math.max(authProbeWaitMs(), frequencyInMs) : frequencyInMs;
     this._pollTimeoutId = setTimeout(() => {
-      this.load()
+      this.pollCycle(frequencyInMs, (onAuthRejected, onNetworkResult) =>
+        this.load(onAuthRejected, onNetworkResult)
+      )
         .then(() => {
           this._pollOutage = false;
         })
         .catch((error) => {
+          // An auth rejection already logged its ERROR (or DEBUG) above, and a
+          // failed probe while auth-failed logs at DEBUG only.
+          if (this._authFailed) return;
           // A failed tick (every leg failed, no last-known-good entry) must not
           // become an unhandled rejection: Node exits on one, and browsers
           // report each to error trackers at the poll frequency. The loop keeps
@@ -638,7 +718,7 @@ export class Quonfig {
             this.doPolling({ frequencyInMs }, generation);
           }
         });
-    }, frequencyInMs);
+    }, waitMs);
 
     this._pollStatus = { status: "running", frequencyInMs };
   }

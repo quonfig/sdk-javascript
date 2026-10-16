@@ -2,7 +2,22 @@
 
 ## Unreleased
 
-Patch release.
+Minor release.
+
+> **UPGRADE:** retry cadence and log levels change after a rejected 401/403/404/410 fetch cycle; a
+> revoked key logs one config ERROR.
+
+- **New: polling slows down for an invalid or revoked SDK key (qfg-goi1.10.29).** A poll cycle in
+  which every leg failed and the primary answered 401, 403, 404 or 410 now logs one `console.error`
+  ("config fetch rejected: the SDK key is invalid or revoked (check the SDK key)", with the status
+  and the primary host, never the key) in place of the "poll failed" warning. Each later poll waits
+  `max(T, frequencyInMs)`, with T uniform in 150-300s and re-drawn each time: no doubling, and it
+  never stops. Probes log at DEBUG. The first 200 or 304 on any leg (the secondary included) logs
+  one `console.info` and polling returns to `frequencyInMs`; a later rejected cycle enters again. A
+  primary 5xx with a secondary 401 keeps today's transient handling. Detection now runs before the
+  last-known-good fallback, so a returning visitor with a revoked key is caught too; serving the
+  last-known-good copy is unchanged. `init()` and `updateContext()` never enter this state.
+  `@quonfig/react` and `@quonfig/react-native` inherit it on their next pin bump.
 
 - **Fix: overlapping `init()` calls install only the newer context (qfg-goi1.10.12).** Each `init()`
   builds its own loader, so when an older `init()`'s response landed after a newer one's, the client
