@@ -51,7 +51,7 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/uuid": "^9.0.5",
-    "esbuild": "^0.19.0",
+    "esbuild": "^0.28.1",
     "jest": "^30.5.2",
     "prettier": "^3.0.0",
     "ts-node": "^10.9.1",
