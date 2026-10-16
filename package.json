@@ -46,7 +46,7 @@
     "quonfig"
   ],
   "dependencies": {
-    "uuid": "^9.0.1"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",
