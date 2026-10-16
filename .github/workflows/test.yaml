@@ -14,7 +14,7 @@ jobs:
       matrix:
         node-version: ["20.9.0", "22", "24"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: sdk-javascript
 
@@ -25,7 +25,7 @@ jobs:
       # be a tag that contains tests/duration/grammar.yaml.
       # See integration-test-data/RELEASING.md.
       - name: Checkout integration-test-data
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: quonfig/integration-test-data
           path: integration-test-data
