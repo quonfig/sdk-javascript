@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** 1.5.0
+  keyed each per-value counter by `JSON.stringify` of the selected value on every `get()`, so a 60KB
+  JSON config cost about 212us per read against about 0.14us with summaries off. The counter
+  identity is now computed once per installed config, and a repeat read in the same window is a
+  counter increment. Counters and the telemetry payload are unchanged. `@quonfig/react` and
+  `@quonfig/react-native` inherit it on their next pin bump.
+
 ## 1.5.0 - 2026-10-16
 
 > **UPGRADE:** retry cadence and log levels change after a rejected 401/403/404/410 fetch cycle; a
