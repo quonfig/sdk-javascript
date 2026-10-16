@@ -24,6 +24,12 @@ type ConfigEvaluationSummary = {
   counters: ConfigEvaluationCounter[];
 };
 
+type CounterSlot = {
+  key: string;
+  window: number;
+  counter?: ConfigEvaluationCounter;
+};
+
 type ConfigEvaluationSummaries = {
   start: number;
   end: number;
@@ -97,6 +103,10 @@ export class EvaluationSummaryAggregator {
   private maxKeys: number;
   private startAt: Date = new Date();
   private enabled = true;
+  // Per-Config counter identity, plus the counter it maps to in `window`.
+  // Weak, so a replaced Config (and its cached key) is collected.
+  private slots: WeakMap<Config, CounterSlot> = new WeakMap();
+  private window = 0;
 
   constructor(client: Quonfig, maxKeys: number) {
     this.client = client;
@@ -106,21 +116,36 @@ export class EvaluationSummaryAggregator {
   record(config: Config): void {
     if (!this.enabled || !config?.configEvaluationMetadata) return;
 
-    const { configType, ...metadata } = config.configEvaluationMetadata;
-    // One counter per evaluated value, as sdk-go keys them (config id + rule
-    // + weighted value + selected value; ITD telemetry.yaml): a flag whose
-    // value or rule changes mid-window gets a new counter instead of being
-    // counted under the first one seen (qfg-goi1.10.12). The leading
-    // "key,type" is what buildSummaries groups on.
-    const fresh = massageConfigForTelemetry(config, metadata);
-    const key = `${config.key},${configType}${COUNTER_SEP}${JSON.stringify(fresh)}`;
+    // Hot path: a Config read again in the same window bumps its cached
+    // counter without rebuilding or serializing it. Config objects are
+    // replaced (never mutated) on each install, so the identity below is
+    // computed once per installed Config, not once per get() (qfg-23uf).
+    let slot = this.slots.get(config);
+    if (slot?.window === this.window && slot.counter) {
+      slot.counter.count += 1;
+      return;
+    }
 
-    let counter = this.data.get(key);
+    const { configType, ...metadata } = config.configEvaluationMetadata;
+    if (!slot) {
+      // One counter per evaluated value, as sdk-go keys them (config id + rule
+      // + weighted value + selected value; ITD telemetry.yaml): a flag whose
+      // value or rule changes mid-window gets a new counter instead of being
+      // counted under the first one seen (qfg-goi1.10.12). The leading
+      // "key,type" is what buildSummaries groups on.
+      const identity = JSON.stringify(massageConfigForTelemetry(config, metadata));
+      slot = { key: `${config.key},${configType}${COUNTER_SEP}${identity}`, window: -1 };
+      this.slots.set(config, slot);
+    }
+
+    let counter = this.data.get(slot.key);
     if (!counter) {
       if (this.data.size >= this.maxKeys) return;
-      counter = fresh;
-      this.data.set(key, counter);
+      counter = massageConfigForTelemetry(config, metadata);
+      this.data.set(slot.key, counter);
     }
+    slot.window = this.window;
+    slot.counter = counter;
     counter.count += 1;
   }
 
@@ -128,6 +153,7 @@ export class EvaluationSummaryAggregator {
   disable(): void {
     this.enabled = false;
     this.data.clear();
+    this.window += 1;
   }
 
   /**
@@ -142,6 +168,7 @@ export class EvaluationSummaryAggregator {
     this.startAt = new Date();
     const toShip = this.data;
     this.data = new Map();
+    this.window += 1;
 
     const summaries: ConfigEvaluationSummaries = {
       start: startAtWas.getTime(),
