@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-Minor release.
+## 1.5.0 - 2026-10-16
 
 > **UPGRADE:** retry cadence and log levels change after a rejected 401/403/404/410 fetch cycle; a
 > revoked key logs one config ERROR.
