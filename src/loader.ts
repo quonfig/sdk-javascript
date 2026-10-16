@@ -53,6 +53,27 @@ export type LoaderResult = {
 
 type CacheEntry = { etag: string; payload: EvaluationPayload };
 
+/**
+ * HTTP statuses that mean the SDK key is invalid or revoked (the auth class,
+ * plan 2026-10-07-sdk-auth-failure-rule R1). Every other failure is transient.
+ */
+export const AUTH_CLASS_STATUSES: ReadonlySet<number> = new Set([401, 403, 404, 410]);
+
+/**
+ * A fetch cycle in which every leg failed and the primary (first) leg answered
+ * with an auth-class status (R2). `host` is the primary's host[:port]; it
+ * never carries the SDK key (sent in a header, not the URL).
+ */
+export type AuthRejection = { status: number; host: string };
+
+const hostOf = (apiUrl: string): string => {
+  try {
+    return new URL(apiUrl).host;
+  } catch {
+    return apiUrl;
+  }
+};
+
 export default class Loader {
   sdkKey: string;
   contexts: Contexts;
@@ -159,8 +180,17 @@ export default class Loader {
    * old context's signature. A superseded call fires no secondary leg (its
    * aborted primary is not a primary failure), clears its hedge timer, never
    * serves last-known-good, and settles with the call that replaced it.
+   *
+   * `onAuthRejected` is called once, synchronously, when every leg failed and
+   * the primary leg's HTTP status is in the auth class (R2). It runs BEFORE the
+   * last-known-good fallback, so a returning visitor with a revoked key is
+   * still detected; serving last-known-good itself is unchanged. A primary
+   * 503 with a secondary 401 is transient and does not call it.
    */
-  loadHedged(onResult: (result: LoaderResult) => void): Promise<void> {
+  loadHedged(
+    onResult: (result: LoaderResult) => void,
+    onAuthRejected?: (rejection: AuthRejection) => void
+  ): Promise<void> {
     const previous = this.supersedeCurrent;
     // Abort the previous call's legs; `previous` below makes it inert before any
     // abort rejection can reach its handlers.
@@ -185,10 +215,19 @@ export default class Loader {
       // pending and nothing ever succeeded.
       let moreLegsPossible = secondaryUrls.length > 0;
       let lastError: unknown;
+      // HTTP status of the primary leg's response (0 = no response yet, or
+      // none: a network error or a timeout).
+      let primaryStatus = 0;
       let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
 
       const settle = () => {
         if (resolved || pending !== 0 || moreLegsPossible || sawSuccess) return;
+        // Entry is decided from the primary's status before last-known-good is
+        // considered. A 200/304 on any leg makes sawSuccess true and never
+        // reaches here.
+        if (onAuthRejected && AUTH_CLASS_STATUSES.has(primaryStatus)) {
+          onAuthRejected({ status: primaryStatus, host: hostOf(primaryUrl) });
+        }
         // Every leg failed and nothing succeeded. Before giving up, serve the
         // last-known-good cache (spec 5h) so a returning visitor with no network
         // gets their last config marked stale instead of an init throw. The
@@ -241,7 +280,9 @@ export default class Loader {
 
       // Primary leg.
       pending += 1;
-      this.fetchFromUrl(primaryUrl, contexts)
+      this.fetchFromUrl(primaryUrl, contexts, (status) => {
+        primaryStatus = status;
+      })
         .then((result) => {
           if (superseded) return;
           onResult(result);
@@ -332,7 +373,11 @@ export default class Loader {
     }
   }
 
-  private fetchFromUrl(apiUrl: string, contexts: Contexts): Promise<LoaderResult> {
+  private fetchFromUrl(
+    apiUrl: string,
+    contexts: Contexts,
+    onStatus?: (status: number) => void
+  ): Promise<LoaderResult> {
     return new Promise<LoaderResult>((resolve, reject) => {
       // Leg-local abort + timeout: the hedge runs legs concurrently, so each
       // owns its own controller (registered in inFlight for supersede-abort)
@@ -365,6 +410,7 @@ export default class Loader {
 
       fetch(url, { signal, headers: requestHeaders })
         .then((response) => {
+          onStatus?.(response.status);
           if (response.status === 304) {
             // Not modified. Return the payload cached for THIS url so the caller
             // always ends up with the current context's evaluations, even if its
