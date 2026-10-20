@@ -186,10 +186,16 @@ export default class Loader {
    * last-known-good fallback, so a returning visitor with a revoked key is
    * still detected; serving last-known-good itself is unchanged. A primary
    * 503 with a secondary 401 is transient and does not call it.
+   *
+   * `onAllFailed` is called once, synchronously, when every leg failed (before
+   * any last-known-good fallback), with one `primary=<host>: <error>` /
+   * `secondary=<host>: <error>` entry per failed leg joined by "; ". It carries
+   * hosts only, never the SDK key.
    */
   loadHedged(
     onResult: (result: LoaderResult) => void,
-    onAuthRejected?: (rejection: AuthRejection) => void
+    onAuthRejected?: (rejection: AuthRejection) => void,
+    onAllFailed?: (legErrors: string) => void
   ): Promise<void> {
     const previous = this.supersedeCurrent;
     // Abort the previous call's legs; `previous` below makes it inert before any
@@ -219,6 +225,15 @@ export default class Loader {
       // none: a network error or a timeout).
       let primaryStatus = 0;
       let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
+      // One `role=host: message` entry per failed leg, in failure order, for the
+      // init log lines (design doc section C). Hosts only: the SDK key travels in
+      // a header and never appears here.
+      const legErrors: string[] = [];
+      const noteLegError = (apiUrl: string, error: unknown) => {
+        const role = apiUrl === primaryUrl ? "primary" : "secondary";
+        const message = error instanceof Error ? error.message : String(error);
+        legErrors.push(`${role}=${hostOf(apiUrl)}: ${message}`);
+      };
 
       const settle = () => {
         if (resolved || pending !== 0 || moreLegsPossible || sawSuccess) return;
@@ -228,6 +243,7 @@ export default class Loader {
         if (onAuthRejected && AUTH_CLASS_STATUSES.has(primaryStatus)) {
           onAuthRejected({ status: primaryStatus, host: hostOf(primaryUrl) });
         }
+        onAllFailed?.(legErrors.join("; "));
         // Every leg failed and nothing succeeded. Before giving up, serve the
         // last-known-good cache (spec 5h) so a returning visitor with no network
         // gets their last config marked stale instead of an init throw. The
@@ -260,6 +276,7 @@ export default class Loader {
           })
           .catch((error) => {
             lastError = error;
+            if (!superseded) noteLegError(apiUrl, error);
           })
           .finally(() => {
             pending -= 1;
@@ -300,6 +317,7 @@ export default class Loader {
         })
         .catch((error) => {
           lastError = error;
+          if (!superseded) noteLegError(primaryUrl, error);
           // A fast primary error fires the hedge NOW rather than idling out the
           // hedge delay — failover should not wait on a dead primary.
           fireSecondaries();

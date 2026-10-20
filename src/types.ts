@@ -155,6 +155,9 @@ export type CollectContextMode = "NONE" | "SHAPE_ONLY" | "PERIODIC_EXAMPLE";
 /**
  * Options passed to quonfig.init().
  */
+/** See {@link InitOptions.onInitFailure}. */
+export type OnInitFailure = "fail" | "wait" | "continue";
+
 export type InitOptions = {
   sdkKey: string;
   context: Contexts;
@@ -209,6 +212,29 @@ export type InitOptions = {
    * failover (`init()` warns when this happens). See spec 5e.
    */
   hedgeDelay?: number;
+  /**
+   * What `init()` does when no Quonfig config is available by
+   * {@link initTimeout}: no live answer and no cached last-known-good copy for
+   * the context. A cached copy (or an SSR bootstrap) counts as config in every
+   * mode, so `init()` resolves on it at once.
+   *
+   * - `"fail"` (default): reject with `QuonfigInitError`.
+   * - `"wait"`: keep `init()` pending and retrying until config arrives.
+   * - `"continue"`: resolve; reads return code defaults (`get()` is `undefined`).
+   *
+   * Before the timeout every mode retries (jittered backoff 0.5s, 1s, 2s, ...,
+   * capped at 30s). A key the primary rejects (401/403/404/410 on every leg)
+   * ends `fail` and `continue` at once. In every mode a client that is not yet
+   * ready keeps retrying in the background and heals: `isReady()` turns true
+   * and subscribers are notified. `poll()` takes over that retry when started.
+   */
+  onInitFailure?: OnInitFailure;
+  /**
+   * Overall deadline (ms) for `init()` to obtain config before
+   * {@link onInitFailure} applies. Default 5000. Separate from the per-leg
+   * {@link timeout}, which bounds each fetch attempt.
+   */
+  initTimeout?: number;
   afterEvaluationCallback?: EvaluationCallback;
   collectEvaluationSummaries?: boolean;
   /**

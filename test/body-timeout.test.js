@@ -40,6 +40,7 @@ describe("fetch deadline covers the body", () => {
     const aborts = [];
     global.fetch = stalledBodyFetch(aborts);
     jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
 
     const q = new Quonfig();
     const started = Date.now();
@@ -51,6 +52,9 @@ describe("fetch deadline covers the body", () => {
           apiUrls: ["https://only.quonfig-staging.com"],
           timeout: 300,
           hedgeDelay: 50,
+          // The leg deadline is under test, not the overall init deadline
+          // (qfg-9p4i.11): bound init just past the first aborted attempt.
+          initTimeout: 500,
           collectEvaluationSummaries: false,
         })
         .then(
@@ -63,6 +67,8 @@ describe("fetch deadline covers the body", () => {
     expect(await outcome).toBe("rejected");
     expect(aborts).toHaveLength(1);
     expect(aborts[0] - started).toBeLessThan(1000);
+    await q.close();
     console.warn.mockRestore();
+    console.error.mockRestore();
   });
 });

@@ -1,4 +1,6 @@
 import { quonfig, Quonfig, QuonfigBootstrap } from "./quonfig";
+import { QuonfigInitError } from "./initError";
+import type { QuonfigInitErrorReason } from "./initError";
 import { Config } from "./config";
 import { contextsEqual, encodeContexts, base64Encode } from "./context";
 import version from "./version";
@@ -16,6 +18,7 @@ import type {
   EvaluationCallback,
   EvaluationReason,
   InitOptions,
+  OnInitFailure,
   ShouldLogArgs,
   CollectContextMode,
   ConfigEvaluationMetadata,
@@ -29,6 +32,8 @@ export {
   quonfig,
   Quonfig,
   QuonfigBootstrap,
+  QuonfigInitError,
+  QuonfigInitErrorReason,
 
   // Config parsing
   Config,
@@ -56,6 +61,7 @@ export {
   EvaluationCallback,
   EvaluationReason,
   InitOptions,
+  OnInitFailure,
   ShouldLogArgs,
   CollectContextMode,
   ConfigEvaluationMetadata,
