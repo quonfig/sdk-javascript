@@ -227,6 +227,8 @@ export class Quonfig {
   // stopPolling(), a re-init) so an in-flight attempt cannot reschedule.
   private _retryGeneration = 0;
   private _retryTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  // Section C background-retry WARN cadence, independent of the retry backoff.
+  private _backgroundLogTimeoutId: ReturnType<typeof setTimeout> | undefined;
   private _initStartedAt = 0;
   // True once an init attempt failed, so the heal logs "init recovered".
   private _initFailedOnce = false;
@@ -434,7 +436,6 @@ export class Quonfig {
       let lastErrs = "";
       let authLogged = false;
       let nextProgressAt = startedAt + INIT_PROGRESS_MS;
-      let lastBackgroundLogAt = 0;
       let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 
       const current = () => initGeneration === this._initGeneration;
@@ -452,10 +453,31 @@ export class Quonfig {
         this._latestInit?.then(resolve, reject);
       };
 
+      // Background-retry WARN (section C): every 30s for the first 5 min after
+      // start, then every 5 min, while the settled client is still not ready.
+      // A timer of its own, so the cadence does not stretch with the retry
+      // backoff (which grows toward its cap between attempts).
+      const scheduleBackgroundLog = () => {
+        const interval =
+          Date.now() - startedAt < BACKGROUND_LOG_SWITCH_MS
+            ? BACKGROUND_LOG_EARLY_MS
+            : BACKGROUND_LOG_LATE_MS;
+        this._backgroundLogTimeoutId = setTimeout(() => {
+          this._backgroundLogTimeoutId = undefined;
+          if (!looping() || this._ready) return;
+          console.warn(
+            `[quonfig] still not connected to Quonfig delivery (${minsSecs(Date.now() - startedAt)} since start); ` +
+              `serving ${this._stale ? "cache" : "defaults"}.${errsPart()}`
+          );
+          scheduleBackgroundLog();
+        }, interval);
+        unrefTimer(this._backgroundLogTimeoutId);
+      };
+
       const finish = (error?: QuonfigInitError) => {
         if (settled) return;
         settled = true;
-        lastBackgroundLogAt = Date.now();
+        if (!this._ready && looping()) scheduleBackgroundLog();
         if (deadlineTimer) {
           clearTimeout(deadlineTimer);
           deadlineTimer = undefined;
@@ -525,18 +547,6 @@ export class Quonfig {
               console.error(`[quonfig] init: ${head} onInitFailure=wait: retrying.`);
             }
           }
-        } else {
-          const interval =
-            now - startedAt < BACKGROUND_LOG_SWITCH_MS
-              ? BACKGROUND_LOG_EARLY_MS
-              : BACKGROUND_LOG_LATE_MS;
-          if (now - lastBackgroundLogAt >= interval) {
-            lastBackgroundLogAt = now;
-            console.warn(
-              `[quonfig] still not connected to Quonfig delivery (${minsSecs(elapsed)} since start); ` +
-                `serving ${this._stale ? "cache" : "defaults"}.${errsPart()}`
-            );
-          }
         }
       };
 
@@ -598,7 +608,7 @@ export class Quonfig {
         } else if (mode === "continue") {
           console.warn(
             `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. ` +
-              `This client may disagree with the rest of your fleet. Retrying in background.`
+              `This instance may disagree with the rest of your fleet. Retrying in background.`
           );
           finish();
         } else {
@@ -623,6 +633,10 @@ export class Quonfig {
       clearTimeout(this._retryTimeoutId);
       this._retryTimeoutId = undefined;
     }
+    if (this._backgroundLogTimeoutId) {
+      clearTimeout(this._backgroundLogTimeoutId);
+      this._backgroundLogTimeoutId = undefined;
+    }
   }
 
   /**
@@ -631,7 +645,7 @@ export class Quonfig {
    * init error, logs the heal when init had failed, stops the retry loop and
    * settles a still-pending init().
    */
-  private markReady(): void {
+  private markReady(via?: { leg?: string; version?: string }): void {
     if (this._ready) return;
     this._ready = true;
     this._initError = undefined;
@@ -639,9 +653,14 @@ export class Quonfig {
     if (this._initFailedOnce) {
       this._initFailedOnce = false;
       const elapsed = secs(Date.now() - this._initStartedAt);
-      const generation = this._heldGeneration > 0 ? ` (generation ${this._heldGeneration})` : "";
+      const leg = via?.leg ? ` via ${via.leg}` : "";
+      const version = via?.version
+        ? ` (version ${via.version})`
+        : this._heldGeneration > 0
+          ? ` (generation ${this._heldGeneration})`
+          : "";
       console.info(
-        `[quonfig] init recovered: config loaded after ${elapsed}${generation}. Now serving live config.`
+        `[quonfig] init recovered: config loaded after ${elapsed}${leg}${version}. Now serving live config.`
       );
     }
     const onReady = this._onReady;
@@ -852,7 +871,6 @@ export class Quonfig {
     const contextChanged = this._loadedContextSig !== sig;
     const wasStale = this._stale;
     const wasReady = this._ready;
-    let installed = false;
     if (!contextChanged && !result.stale) {
       // A live network answer for the held context (a 304, or an equal-or-older
       // generation the guard below declines) still proves the network is back,
@@ -861,7 +879,6 @@ export class Quonfig {
     }
     if (!result.notModified || contextChanged) {
       if (contextChanged || this.shouldInstall(result.payload)) {
-        installed = true;
         this.setConfig(result.payload);
         this._loadedContextSig = sig;
         // A served-from-cache install (result.stale) is non-authoritative until
@@ -883,11 +900,15 @@ export class Quonfig {
     }
     // Any live answer for the current context (installed or confirmed) makes
     // the client ready.
-    if (!result.stale && this._loadedContextSig === sig) this.markReady();
-    // A heal that installed nothing (a 304, or an equal generation after a
-    // stale or failed start) still changes what isReady()/stale/error report,
-    // so subscribers (sdk-react's useSyncExternalStore) must hear about it.
-    if (!installed && (wasStale !== this._stale || wasReady !== this._ready)) {
+    if (!result.stale && this._loadedContextSig === sig) {
+      this.markReady({ leg: result.leg, version: result.payload?.meta?.version });
+    }
+    // A heal changes what isReady()/stale/error report. setConfig() above
+    // notified BEFORE readiness and staleness were updated, so subscribers
+    // (sdk-react's useSyncExternalStore) must hear about the new state again,
+    // whether or not this result installed anything (a 304, or an equal
+    // generation after a stale or failed start, installs nothing).
+    if (wasStale !== this._stale || wasReady !== this._ready) {
       this.notifySubscribers();
     }
   }

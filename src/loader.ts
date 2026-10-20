@@ -49,6 +49,8 @@ export type LoaderResult = {
    * non-authoritative until the network recovers.
    */
   stale?: boolean;
+  /** Which leg answered (absent for a last-known-good cache result). */
+  leg?: "primary" | "secondary";
 };
 
 type CacheEntry = { etag: string; payload: EvaluationPayload };
@@ -267,7 +269,7 @@ export default class Loader {
             if (superseded) return;
             // sawSuccess only after onResult returns: a throwing install counts
             // as a failed leg, so the load still settles (resolve or reject).
-            onResult(result);
+            onResult({ ...result, leg: "secondary" });
             sawSuccess = true;
             if (!resolved) {
               resolved = true;
@@ -302,7 +304,7 @@ export default class Loader {
       })
         .then((result) => {
           if (superseded) return;
-          onResult(result);
+          onResult({ ...result, leg: "primary" });
           sawSuccess = true;
           if (!resolved) {
             resolved = true;
