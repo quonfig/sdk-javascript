@@ -29,3 +29,10 @@ updates:
     groups:
       npm-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Runtime and peer dependencies of the published package. The range we
+      # declare is the floor customers must install, so a major bump here
+      # forces every customer onto that major. Raise these floors
+      # deliberately in a release, not via Dependabot.
+      - dependency-name: "uuid"
+        update-types: ["version-update:semver-major"]
