@@ -49,6 +49,8 @@ export type LoaderResult = {
    * non-authoritative until the network recovers.
    */
   stale?: boolean;
+  /** For a last-known-good result: when the cached copy was written (epoch ms), if known. */
+  savedAt?: number;
   /** Which leg answered (absent for a last-known-good cache result). */
   leg?: "primary" | "secondary";
 };
@@ -254,7 +256,12 @@ export default class Loader {
         const cached = this.readLastKnownGood(contexts);
         if (cached) {
           resolved = true;
-          onResult({ notModified: false, payload: cached.payload, stale: true });
+          onResult({
+            notModified: false,
+            payload: cached.payload,
+            stale: true,
+            savedAt: cached.savedAt,
+          });
           resolve();
           return;
         }
@@ -374,7 +381,7 @@ export default class Loader {
    * unavailable. Host-agnostic, so an entry persisted while talking to the
    * primary is still served when both primary and secondary are unreachable.
    */
-  private readLastKnownGood(contexts: Contexts) {
+  readLastKnownGood(contexts: Contexts) {
     return readLkg(this.sdkKey, encodeContexts(contexts));
   }
 

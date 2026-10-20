@@ -39,6 +39,11 @@ export type LkgEntry = {
   /** Meta.generation stamped on the cached payload (0 if unversioned). */
   generation: number;
   payload: EvaluationPayload;
+  /**
+   * When the entry was written (epoch ms), for the "cached config from <age>
+   * ago" log line. Absent on entries written before it was recorded.
+   */
+  savedAt?: number;
 };
 
 type StoredEntry = LkgEntry & { ctxHash: string };
@@ -101,7 +106,11 @@ export function readLkg(sdkKey: string, contextSig: string): LkgEntry | undefine
       return undefined;
     }
     if (parsed.ctxHash !== contextHash(contextSig)) return undefined;
-    return { generation: parsed.generation, payload: parsed.payload };
+    const entry: LkgEntry = { generation: parsed.generation, payload: parsed.payload };
+    if (typeof parsed.savedAt === "number" && Number.isFinite(parsed.savedAt)) {
+      entry.savedAt = parsed.savedAt;
+    }
+    return entry;
   } catch {
     return undefined;
   }
@@ -151,6 +160,7 @@ export function writeLkg(sdkKey: string, contextSig: string, entry: LkgEntry): v
       ctxHash: contextHash(contextSig),
       generation: entry.generation,
       payload: entry.payload,
+      savedAt: entry.savedAt ?? Date.now(),
     };
     ls.setItem(slotKey(sdkKey), JSON.stringify(stored));
   } catch {

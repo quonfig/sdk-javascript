@@ -39,6 +39,16 @@
   disagree"; the heal INFO names the leg and version (`... via primary (version <v>)`); the "still
   not connected" WARN runs on its own 30s / 5min timer instead of waiting for the next retry
   attempt, which the backoff could push out past the first interval.
+- **Logging: starting on a cached copy is visible (section C).** `init()` resolving on the cached
+  last-known-good copy now logs one WARN, `STARTING ON CACHED CONFIG from <age> ago` (or
+  `(age unknown)` for a copy cached by an older release), naming each leg's error; later attempts
+  are covered by the "still not connected ... serving cache" WARN. Cached copies now record when
+  they were written.
+- **Fix: the `initTimeout` starts on a cached copy when one exists.** When the network hangs, the
+  attempt in flight has not reached the cache by the timeout, so `"continue"` logged
+  `STARTING ON CODE DEFAULTS` and `"fail"` rejected while a cached copy was available. At the
+  timeout every mode now installs the cached copy, resolves `init()` and logs
+  `STARTING ON CACHED CONFIG from <age> ago`. Without a cached copy nothing changes.
 
 ## 1.5.1 - 2026-10-16
 
