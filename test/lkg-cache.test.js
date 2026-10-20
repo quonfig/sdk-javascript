@@ -58,6 +58,7 @@ const newQuonfig = async (overrides = {}) => {
     apiUrls: URLS,
     hedgeDelay: 40,
     timeout: 500,
+    initTimeout: 300,
     collectEvaluationSummaries: false,
     ...overrides,
   });
@@ -67,12 +68,23 @@ const newQuonfig = async (overrides = {}) => {
 describe("last-known-good localStorage cache (5h)", () => {
   let originalFetch;
   let originalLS;
+  // A client serving a cached copy (or nothing) keeps retrying in the
+  // background (qfg-9p4i.11); close every client so a retry cannot reach the
+  // next test's fetch mock or localStorage.
+  const live = [];
+  const realInit = Quonfig.prototype.init;
   beforeEach(() => {
+    Quonfig.prototype.init = function (...args) {
+      live.push(this);
+      return realInit.apply(this, args);
+    };
     originalFetch = global.fetch;
     originalLS = global.localStorage;
     global.localStorage = fakeLocalStorage();
   });
-  afterEach(() => {
+  afterEach(async () => {
+    Quonfig.prototype.init = realInit;
+    await Promise.all(live.splice(0).map((q) => q.close()));
     global.fetch = originalFetch;
     if (originalLS === undefined) delete global.localStorage;
     else global.localStorage = originalLS;
@@ -139,6 +151,8 @@ describe("last-known-good localStorage cache (5h)", () => {
         apiUrls: URLS,
         hedgeDelay: 40,
         timeout: 500,
+        initTimeout: 300,
+        initTimeout: 300,
         collectEvaluationSummaries: false,
       })
     ).rejects.toThrow();
@@ -161,6 +175,8 @@ describe("last-known-good localStorage cache (5h)", () => {
         apiUrls: URLS,
         hedgeDelay: 40,
         timeout: 500,
+        initTimeout: 300,
+        initTimeout: 300,
         collectEvaluationSummaries: false,
       })
     ).rejects.toThrow();

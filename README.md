@@ -19,7 +19,8 @@ await quonfig.init({
   context: { user: { key: "user-123" } },
 });
 
-// init() fetches once. Start polling to pick up flag changes. poll()'s promise
+// init() resolves once config is loaded (see "When config cannot be loaded at
+// startup" below). Start polling to pick up flag changes. poll()'s promise
 // rejects if its first fetch fails, but the loop keeps running and retrying.
 quonfig.poll({ frequencyInMs: 60_000 }).catch(() => {});
 
@@ -30,20 +31,41 @@ if (quonfig.isEnabled("my-flag")) {
 const color = quonfig.get("button-color");
 ```
 
-`init()` rejects when every API URL fails and this browser has no last-known-good copy for the
-context. With a last-known-good copy it resolves instead and serves those values marked stale
-(`quonfig.stale` is `true`, `getDetails()` reports reason `STALE`) until a fetch succeeds. After a
-rejection, `get()` returns `undefined` and `isEnabled()` returns `false`, so wrap `init()` in
-`try`/`catch` and still call `poll()` if you want the client to recover when the network comes back:
+### When config cannot be loaded at startup
+
+`init()` retries (jittered backoff 0.5s, 1s, 2s, ..., capped at 30s) until it has config or
+`initTimeout` (default 5000ms) passes. A last-known-good copy cached in this browser for the
+context, or an SSR bootstrap, counts as config: `init()` resolves on it at once and serves those
+values marked stale (`quonfig.stale` is `true`, `getDetails()` reports reason `STALE`) until a fetch
+succeeds. With neither, `onInitFailure` decides:
+
+| `onInitFailure`    | At `initTimeout`                                               |
+| ------------------ | -------------------------------------------------------------- |
+| `"fail"` (default) | `init()` rejects with `QuonfigInitError`                       |
+| `"wait"`           | `init()` stays pending and keeps retrying until config lands   |
+| `"continue"`       | `init()` resolves; `get()` returns `undefined` (code defaults) |
+
+A key the primary rejects (401/403/404/410 on every leg) ends `"fail"` and `"continue"` at once. In
+every mode the client keeps retrying in the background until it has live config, then installs it,
+notifies subscribers and logs one `[quonfig] init recovered` line. `isReady()` tells you whether the
+client holds live config, and `quonfig.error` holds the `QuonfigInitError` (cleared on heal):
 
 ```js
+import { quonfig, QuonfigInitError } from "@quonfig/javascript";
+
 try {
-  await quonfig.init({ sdkKey: "your-frontend-sdk-key", context });
+  await quonfig.init({ sdkKey: "your-frontend-sdk-key", context, initTimeout: 5000 });
 } catch (error) {
-  console.warn("Quonfig init failed; serving defaults until a poll succeeds", error);
+  // error instanceof QuonfigInitError; error.reason is "timeout", "unavailable" or "unauthorized".
+  // The client keeps retrying and heals on its own when the network returns.
 }
-quonfig.poll({ frequencyInMs: 60_000 }).catch(() => {});
+
+// Or start on code defaults and let the client heal in the background:
+await quonfig.init({ sdkKey: "your-frontend-sdk-key", context, onInitFailure: "continue" });
+if (!quonfig.isReady()) console.warn("serving cached/default flags");
 ```
+
+`poll()` takes over the background retry when you start it.
 
 ### Invalid or revoked SDK key
 
@@ -52,8 +74,8 @@ When a poll fails on every leg and the primary answers 401, 403, 404 or 410, the
 host, never the key. It keeps serving the current config and slows polling to one fetch every
 150-300s (or `frequencyInMs`, if longer) for as long as the page lives. The first 200 or 304 on any
 leg logs one `console.info` and polling returns to `frequencyInMs`. `init()` and `updateContext()`
-never trigger this; only poll ticks do. A primary 5xx with a secondary 401 is treated as a transient
-failure.
+never trigger this slow-poll state; only poll ticks do (`init()` handles a rejected key through
+`onInitFailure`, above). A primary 5xx with a secondary 401 is treated as a transient failure.
 
 ## Failover & `QUONFIG_DOMAIN`
 

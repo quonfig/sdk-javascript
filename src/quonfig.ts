@@ -7,6 +7,7 @@ import Loader, { type AuthRejection, type LoaderResult } from "./loader";
 import { DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY } from "./apiHelpers";
 import { writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
+import { QuonfigInitError } from "./initError";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
 // Telemetry debug lines print only when this log-level config evaluates to
@@ -25,6 +26,7 @@ import type {
   EvaluationPayload,
   EvaluationReason,
   InitOptions,
+  OnInitFailure,
 } from "./types";
 
 /**
@@ -117,6 +119,37 @@ const AUTH_PROBE_SPAN_MS = 150_000;
 const authProbeWaitMs = (): number =>
   AUTH_PROBE_MIN_MS + Math.floor(Math.random() * AUTH_PROBE_SPAN_MS);
 
+/** Default overall init deadline for a client SDK (design doc A.1). */
+export const DEFAULT_INIT_TIMEOUT = 5000;
+const INIT_FAILURE_MODES: ReadonlySet<string> = new Set(["fail", "wait", "continue"]);
+// Init/background retry backoff: 0.5s, 1s, 2s, 4s, ... capped at 30s, +/-20%
+// jitter (design doc B.3).
+const RETRY_BASE_MS = 500;
+const RETRY_CAP_MS = 30_000;
+const retryDelayMs = (attempt: number): number => {
+  const base = Math.min(RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1), RETRY_CAP_MS);
+  return Math.round(base * (0.8 + Math.random() * 0.4));
+};
+// Progress cadence (design doc C): every 5s until the timeout, every 30s while
+// `wait` blocks past it. While not ready after init settles: every 30s for the
+// first 5 minutes, then every 5 minutes.
+const INIT_PROGRESS_MS = 5_000;
+const WAIT_PROGRESS_MS = 30_000;
+const BACKGROUND_LOG_EARLY_MS = 30_000;
+const BACKGROUND_LOG_LATE_MS = 300_000;
+const BACKGROUND_LOG_SWITCH_MS = 300_000;
+
+const secs = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
+const wholeSecs = (ms: number): string => `${Math.round((ms / 1000) * 10) / 10}s`;
+const minsSecs = (ms: number): string => {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  return m > 0 ? `${m}m${total % 60}s` : `${total}s`;
+};
+const unrefTimer = (t: ReturnType<typeof setTimeout>) => {
+  (t as unknown as { unref?: () => void }).unref?.();
+};
+
 type PollStatus =
   | { status: "not-started" }
   | { status: "pending" }
@@ -182,6 +215,27 @@ export class Quonfig {
   // every tick, permanently reverting fresh data to SSR-time values and making
   // server-side flag flips invisible (qfg-xqxi).
   private _bootstrapConsumed = false;
+  // Readiness (design doc B.4): true once a live network answer (or an SSR
+  // bootstrap) for the current context has been installed or confirmed. A
+  // served last-known-good copy is config but not ready (it is stale).
+  private _ready = false;
+  // The QuonfigInitError the latest init() rejected with; cleared on heal.
+  private _initError: QuonfigInitError | undefined;
+  // Bumped by every init(); an older init's retry loop stops when it changes.
+  private _initGeneration = 0;
+  // Init/background retry loop. Bumped by stopInitRetry() (poll(), close(),
+  // stopPolling(), a re-init) so an in-flight attempt cannot reschedule.
+  private _retryGeneration = 0;
+  private _retryTimeoutId: ReturnType<typeof setTimeout> | undefined;
+  private _initStartedAt = 0;
+  // True once an init attempt failed, so the heal logs "init recovered".
+  private _initFailedOnce = false;
+  // Settles a still-pending init() when readiness arrives from any path (a
+  // poll tick, updateContext), not only from the init retry loop.
+  private _onReady: (() => void) | undefined;
+  // The latest init()'s promise. A superseded init() settles with it, as a
+  // superseded load settles with the load that replaced it.
+  private _latestInit: Promise<void> | undefined;
 
   // SDK identity reported in telemetry. Wrappers (e.g. @quonfig/react)
   // overwrite these on init so each wrapper SDK shows up distinctly in the
@@ -205,6 +259,8 @@ export class Quonfig {
     telemetryUrl,
     timeout,
     hedgeDelay,
+    onInitFailure,
+    initTimeout,
     afterEvaluationCallback = () => {},
     collectEvaluationSummaries = true,
     collectContextMode = "PERIODIC_EXAMPLE",
@@ -324,7 +380,291 @@ export class Quonfig {
 
     this.afterEvaluationCallback = afterEvaluationCallback;
 
-    return this.load();
+    let mode: OnInitFailure = "fail";
+    if (onInitFailure !== undefined) {
+      if (INIT_FAILURE_MODES.has(onInitFailure)) {
+        mode = onInitFailure;
+      } else {
+        console.warn(
+          `[quonfig] unknown onInitFailure "${String(onInitFailure)}"; using "fail". ` +
+            `Valid values: "fail", "wait", "continue".`
+        );
+      }
+    }
+    const effectiveInitTimeout =
+      typeof initTimeout === "number" && Number.isFinite(initTimeout) && initTimeout >= 0
+        ? initTimeout
+        : DEFAULT_INIT_TIMEOUT;
+
+    return this.runInit(mode, effectiveInitTimeout);
+  }
+
+  /**
+   * The init retry loop (design doc B.3). Attempts a hedged load, retrying with
+   * backoff until config arrives. The returned promise settles:
+   *   - resolved on the first live answer or cached last-known-good copy (a
+   *     cache counts as config in every mode);
+   *   - at `initTimeout` per `mode`: `fail` rejects with QuonfigInitError,
+   *     `continue` resolves on code defaults, `wait` keeps waiting;
+   *   - at once on an auth rejection under `fail` (reject) or `continue`.
+   * The same loop keeps running in the background after it settles, until the
+   * client is ready, so no client is left permanently dead.
+   */
+  private runInit(mode: OnInitFailure, initTimeout: number): Promise<void> {
+    this.stopInitRetry();
+    this._initGeneration += 1;
+    const initGeneration = this._initGeneration;
+    const retryGeneration = this._retryGeneration;
+    const startedAt = Date.now();
+    this._initStartedAt = startedAt;
+    this._ready = false;
+    this._initError = undefined;
+    this._initFailedOnce = false;
+    const timeoutLabel = wholeSecs(initTimeout);
+
+    console.debug(
+      `[quonfig] init: fetching config (initTimeout=${timeoutLabel}, onInitFailure=${mode})`
+    );
+
+    const promise = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let attempt = 0;
+      let anyAttemptFailed = false;
+      let lastError: unknown;
+      let lastErrs = "";
+      let authLogged = false;
+      let nextProgressAt = startedAt + INIT_PROGRESS_MS;
+      let lastBackgroundLogAt = 0;
+      let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const current = () => initGeneration === this._initGeneration;
+      const looping = () => current() && retryGeneration === this._retryGeneration;
+      const errsPart = () => (lastErrs ? ` ${lastErrs}.` : "");
+
+      // A newer init() replaced this one: stop and settle with it.
+      const followNewer = () => {
+        if (settled) return;
+        settled = true;
+        if (deadlineTimer) {
+          clearTimeout(deadlineTimer);
+          deadlineTimer = undefined;
+        }
+        this._latestInit?.then(resolve, reject);
+      };
+
+      const finish = (error?: QuonfigInitError) => {
+        if (settled) return;
+        settled = true;
+        lastBackgroundLogAt = Date.now();
+        if (deadlineTimer) {
+          clearTimeout(deadlineTimer);
+          deadlineTimer = undefined;
+        }
+        if (error) {
+          this._initError = error;
+          this.notifySubscribers();
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+
+      this._onReady = () => {
+        if (current()) finish();
+      };
+
+      const scheduleNext = (authRejected: boolean) => {
+        if (!looping() || this._ready) return;
+        let delay = retryDelayMs(attempt);
+        // A rejected key is probed slowly once init has settled (the same
+        // 150-300s cadence the poll loop uses while auth-failed).
+        if (authRejected && settled) delay = Math.max(delay, authProbeWaitMs());
+        this._retryTimeoutId = setTimeout(attemptOnce, delay);
+        // Once init has settled this is a background retry: it must not keep a
+        // Node process (SSR, tests) alive on its own.
+        if (settled) unrefTimer(this._retryTimeoutId);
+      };
+
+      const onFailedAttempt = (error: unknown, rejection: AuthRejection | undefined) => {
+        anyAttemptFailed = true;
+        lastError = error;
+        const now = Date.now();
+        const elapsed = now - startedAt;
+
+        if (!settled) {
+          if (attempt === 1) {
+            this._initFailedOnce = true;
+            console.warn(
+              `[quonfig] init: config not loaded yet, retrying until initTimeout (${timeoutLabel}).${errsPart()}`
+            );
+          } else if (now >= nextProgressAt) {
+            const timedOut = elapsed >= initTimeout;
+            console.warn(
+              timedOut
+                ? `[quonfig] init: still blocked waiting for config (${minsSecs(elapsed)} elapsed, attempt ${attempt}).${errsPart()}`
+                : `[quonfig] init: still waiting for config (${secs(elapsed)} elapsed of ${timeoutLabel}, attempt ${attempt}).${errsPart()}`
+            );
+            while (nextProgressAt <= now) {
+              nextProgressAt += timedOut ? WAIT_PROGRESS_MS : INIT_PROGRESS_MS;
+            }
+          }
+
+          if (rejection && !authLogged) {
+            authLogged = true;
+            const head = `SDK key rejected (${rejection.status}) by ${rejection.host}. Check the key and environment.`;
+            if (mode === "fail") {
+              const message = `[quonfig] init FAILED: ${head} onInitFailure=fail: raising now.`;
+              console.error(message);
+              finish(new QuonfigInitError("unauthorized", message, error));
+            } else if (mode === "continue") {
+              console.warn(
+                `[quonfig] init: ${head} onInitFailure=continue: STARTING ON CODE DEFAULTS. Retrying in background.`
+              );
+              finish();
+            } else {
+              console.error(`[quonfig] init: ${head} onInitFailure=wait: retrying.`);
+            }
+          }
+        } else {
+          const interval =
+            now - startedAt < BACKGROUND_LOG_SWITCH_MS
+              ? BACKGROUND_LOG_EARLY_MS
+              : BACKGROUND_LOG_LATE_MS;
+          if (now - lastBackgroundLogAt >= interval) {
+            lastBackgroundLogAt = now;
+            console.warn(
+              `[quonfig] still not connected to Quonfig delivery (${minsSecs(elapsed)} since start); ` +
+                `serving ${this._stale ? "cache" : "defaults"}.${errsPart()}`
+            );
+          }
+        }
+      };
+
+      const attemptOnce = () => {
+        if (!looping() || this._ready) return;
+        attempt += 1;
+        let rejection: AuthRejection | undefined;
+        let legErrs: string | undefined;
+        this.load(
+          (r) => {
+            rejection = r;
+          },
+          undefined,
+          (errs) => {
+            legErrs = errs;
+          }
+        ).then(
+          () => {
+            if (!current()) return followNewer();
+            if (!looping()) return;
+            if (this._ready) {
+              finish();
+              return;
+            }
+            // Resolved without readiness: the last-known-good copy was served
+            // (every leg failed). That is config, so init resolves; keep
+            // retrying for a live answer in the background.
+            if (legErrs) lastErrs = legErrs;
+            if (!settled) {
+              this._initFailedOnce = true;
+              finish();
+            }
+            scheduleNext(rejection !== undefined);
+          },
+          (error) => {
+            if (!current()) return followNewer();
+            if (!looping()) return;
+            lastErrs = legErrs || (error instanceof Error ? error.message : String(error));
+            onFailedAttempt(error, rejection);
+            scheduleNext(rejection !== undefined);
+          }
+        );
+      };
+
+      deadlineTimer = setTimeout(() => {
+        deadlineTimer = undefined;
+        if (!current()) return followNewer();
+        if (settled || this._ready) return;
+        const elapsed = secs(Date.now() - startedAt);
+        if (mode === "fail") {
+          const message =
+            `[quonfig] init FAILED: no config after ${elapsed}.${errsPart()} onInitFailure=fail: ` +
+            `raising QuonfigInitError. Options: onInitFailure=wait to keep waiting, ` +
+            `onInitFailure=continue to start on code defaults, or raise initTimeout.`;
+          console.error(message);
+          finish(
+            new QuonfigInitError(anyAttemptFailed ? "unavailable" : "timeout", message, lastError)
+          );
+        } else if (mode === "continue") {
+          console.warn(
+            `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. ` +
+              `This client may disagree with the rest of your fleet. Retrying in background.`
+          );
+          finish();
+        } else {
+          console.warn(
+            `[quonfig] init: no config after ${elapsed}. onInitFailure=wait: still blocking startup and ` +
+              `retrying indefinitely.${errsPart()} Use onInitFailure=fail or continue to bound startup.`
+          );
+          nextProgressAt = Date.now() + WAIT_PROGRESS_MS;
+        }
+      }, initTimeout);
+
+      attemptOnce();
+    });
+    this._latestInit = promise;
+    return promise;
+  }
+
+  /** Stop the init/background retry loop (it does not settle a pending init()). */
+  private stopInitRetry(): void {
+    this._retryGeneration += 1;
+    if (this._retryTimeoutId) {
+      clearTimeout(this._retryTimeoutId);
+      this._retryTimeoutId = undefined;
+    }
+  }
+
+  /**
+   * Readiness flips true on the first live answer for the current context
+   * (from any path: init's retry loop, a poll tick, updateContext). Clears the
+   * init error, logs the heal when init had failed, stops the retry loop and
+   * settles a still-pending init().
+   */
+  private markReady(): void {
+    if (this._ready) return;
+    this._ready = true;
+    this._initError = undefined;
+    this.stopInitRetry();
+    if (this._initFailedOnce) {
+      this._initFailedOnce = false;
+      const elapsed = secs(Date.now() - this._initStartedAt);
+      const generation = this._heldGeneration > 0 ? ` (generation ${this._heldGeneration})` : "";
+      console.info(
+        `[quonfig] init recovered: config loaded after ${elapsed}${generation}. Now serving live config.`
+      );
+    }
+    const onReady = this._onReady;
+    this._onReady = undefined;
+    onReady?.();
+  }
+
+  /**
+   * Whether the client holds live config: a network answer (or an SSR
+   * bootstrap) for the current context. False before the first answer, while
+   * serving a cached last-known-good copy, and after a failed init until the
+   * background retry (or `poll()`) heals it.
+   */
+  isReady(): boolean {
+    return this._ready;
+  }
+
+  /**
+   * The `QuonfigInitError` the latest `init()` rejected with
+   * (`onInitFailure: "fail"`), or undefined. Cleared when the client heals.
+   */
+  get error(): QuonfigInitError | undefined {
+    return this._initError;
   }
 
   // -- Accessors --
@@ -426,7 +766,8 @@ export class Quonfig {
    */
   private async load(
     onAuthRejected?: (rejection: AuthRejection) => void,
-    onNetworkResult?: () => void
+    onNetworkResult?: () => void,
+    onAllFailed?: (legErrors: string) => void
   ): Promise<void> {
     if (!this.loader) {
       throw new Error("Quonfig not initialized. Call init() first.");
@@ -443,6 +784,7 @@ export class Quonfig {
         this.setConfig({ evaluations: bootstrap.evaluations });
         this._loadedContextSig = encodeContexts(this._contexts);
         this._bootstrapConsumed = true;
+        this.markReady();
         return;
       }
     }
@@ -461,10 +803,14 @@ export class Quonfig {
     // what wins. A late, newer primary heals forward over a stale secondary that
     // painted first.
     return this.loader
-      .loadHedged((result) => {
-        this.applyLoaderResult(result, sig);
-        if (!result.stale) onNetworkResult?.();
-      }, onAuthRejected)
+      .loadHedged(
+        (result) => {
+          this.applyLoaderResult(result, sig);
+          if (!result.stale) onNetworkResult?.();
+        },
+        onAuthRejected,
+        onAllFailed
+      )
       .finally(() => {
         if (this.pollStatus.status === "running") {
           this._pollCount += 1;
@@ -504,6 +850,9 @@ export class Quonfig {
     if (sig !== encodeContexts(this._contexts)) return;
 
     const contextChanged = this._loadedContextSig !== sig;
+    const wasStale = this._stale;
+    const wasReady = this._ready;
+    let installed = false;
     if (!contextChanged && !result.stale) {
       // A live network answer for the held context (a 304, or an equal-or-older
       // generation the guard below declines) still proves the network is back,
@@ -512,6 +861,7 @@ export class Quonfig {
     }
     if (!result.notModified || contextChanged) {
       if (contextChanged || this.shouldInstall(result.payload)) {
+        installed = true;
         this.setConfig(result.payload);
         this._loadedContextSig = sig;
         // A served-from-cache install (result.stale) is non-authoritative until
@@ -530,6 +880,15 @@ export class Quonfig {
           });
         }
       }
+    }
+    // Any live answer for the current context (installed or confirmed) makes
+    // the client ready.
+    if (!result.stale && this._loadedContextSig === sig) this.markReady();
+    // A heal that installed nothing (a 304, or an equal generation after a
+    // stale or failed start) still changes what isReady()/stale/error report,
+    // so subscribers (sdk-react's useSyncExternalStore) must hear about it.
+    if (!installed && (wasStale !== this._stale || wasReady !== this._ready)) {
+      this.notifySubscribers();
     }
   }
 
@@ -727,6 +1086,9 @@ export class Quonfig {
    * Stop polling for config updates.
    */
   stopPolling(): void {
+    // poll() calls this first, so a poll loop takes over healing from the
+    // init/background retry; close() stops both.
+    this.stopInitRetry();
     this._pollGeneration += 1;
     if (this.pollTimeoutId) {
       clearTimeout(this.pollTimeoutId);

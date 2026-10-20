@@ -54,6 +54,7 @@ const init = (q, context) =>
     context,
     apiUrls: URLS,
     timeout: 500,
+    initTimeout: 300,
     collectEvaluationSummaries: false,
   });
 
@@ -62,7 +63,16 @@ const lkgKeys = (ls) => Array.from(ls._store.keys()).filter((k) => k.startsWith(
 describe("last-known-good cache: one slot per sdkKey", () => {
   let originalFetch;
   let originalLS;
+  // A client serving a cached copy (or nothing) keeps retrying in the
+  // background (qfg-9p4i.11); close every client so a retry cannot reach the
+  // next test's fetch mock or localStorage.
+  const live = [];
+  const realInit = Quonfig.prototype.init;
   beforeEach(() => {
+    Quonfig.prototype.init = function (...args) {
+      live.push(this);
+      return realInit.apply(this, args);
+    };
     originalFetch = global.fetch;
     originalLS = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
     Object.defineProperty(globalThis, "localStorage", {
@@ -72,7 +82,9 @@ describe("last-known-good cache: one slot per sdkKey", () => {
     });
     jest.spyOn(console, "warn").mockImplementation(() => {});
   });
-  afterEach(() => {
+  afterEach(async () => {
+    Quonfig.prototype.init = realInit;
+    await Promise.all(live.splice(0).map((q) => q.close()));
     global.fetch = originalFetch;
     if (originalLS) Object.defineProperty(globalThis, "localStorage", originalLS);
     else delete globalThis.localStorage;

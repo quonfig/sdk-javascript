@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased
+
+> **UPGRADE (minor):** `init()` now retries for up to `initTimeout` (5s) before it rejects, where it
+> used to reject as soon as one hedged attempt failed. The default stays `onInitFailure: "fail"`
+> with a cached last-known-good copy counting as config, so who gets which values does not change. A
+> failed or stale client now heals on its own when the network returns, without `poll()`.
+
+- **New: `onInitFailure` and `initTimeout` (qfg-9p4i.11).**
+  `onInitFailure: "fail" | "wait" | "continue"` picks what `init()` does when no config is available
+  by `initTimeout` (default 5000ms, separate from the per-leg `timeout`): `"fail"` (default) rejects
+  with the new exported `QuonfigInitError` (`.reason` is `"timeout"`, `"unavailable"` or
+  `"unauthorized"`), `"wait"` keeps `init()` pending until config arrives, and `"continue"` resolves
+  on code defaults. A cached last-known-good copy or an SSR bootstrap resolves `init()` at once in
+  every mode. Until the timeout, attempts repeat with jittered backoff (0.5s, 1s, 2s, ..., capped at
+  30s). A key the primary rejects (401/403/404/410 on every leg) rejects `"fail"` and resolves
+  `"continue"` at once; `"wait"` keeps retrying. An unknown value warns once and uses `"fail"`.
+- **New: `isReady()` and `error`.** `isReady()` is true once live config for the current context is
+  installed or confirmed (false while serving a cached copy or defaults). `error` holds the
+  `QuonfigInitError` the latest `init()` rejected with and clears on heal. Subscribers are notified
+  when either changes, and both return the same value until they change, so `useSyncExternalStore`
+  callers stay stable.
+- **Fix: no permanently dead clients.** A client that is not ready after `init()` settles (a caught
+  rejection, `"continue"`, or a stale cached copy) keeps retrying in the background with the same
+  backoff and heals: it installs the config, `isReady()` turns true, and one
+  `[quonfig] init recovered` line is logged at INFO. `poll()` takes over that retry when started,
+  and `close()`/`stopPolling()` stop it.
+- **Logging (design doc section C).** One WARN on the first failed attempt naming each leg's host
+  and error (`primary=<host>: <error>; secondary=<host>: <error>`, never the key), progress WARNs,
+  an ERROR at the `"fail"` timeout, a WARN at the `"continue"`/`"wait"` timeout, and "still not
+  connected" WARNs while not ready (every 30s for 5 minutes, then every 5 minutes). `@quonfig/react`
+  and `@quonfig/react-native` inherit this on their next pin bump.
+
 ## 1.5.1 - 2026-10-16
 
 - **Fix: eval-summary telemetry no longer serializes the value on every read (qfg-23uf).** 1.5.0
