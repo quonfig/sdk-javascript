@@ -31,6 +31,14 @@
   an ERROR at the `"fail"` timeout, a WARN at the `"continue"`/`"wait"` timeout, and "still not
   connected" WARNs while not ready (every 30s for 5 minutes, then every 5 minutes). `@quonfig/react`
   and `@quonfig/react-native` inherit this on their next pin bump.
+- **Fix: a background heal now notifies subscribers after readiness flips.** When the heal installed
+  config, subscribers were notified before `isReady()` turned true and not again after, so
+  `@quonfig/react`'s `useQuonfig()` stayed on `isReady: false`, the old `error` and
+  `source: "defaults"` after `init recovered` unless `pollInterval` was set (found on React Native).
+- **Logging follow-ups (section C).** The `"continue"` timeout WARN says "This instance may
+  disagree"; the heal INFO names the leg and version (`... via primary (version <v>)`); the "still
+  not connected" WARN runs on its own 30s / 5min timer instead of waiting for the next retry
+  attempt, which the backoff could push out past the first interval.
 
 ## 1.5.1 - 2026-10-16
 
