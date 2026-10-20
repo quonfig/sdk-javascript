@@ -146,6 +146,15 @@ const minsSecs = (ms: number): string => {
   const m = Math.floor(total / 60);
   return m > 0 ? `${m}m${total % 60}s` : `${total}s`;
 };
+// Age of a cached copy for the "cached config from <age> ago" line.
+const ageLabel = (ms: number): string => {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86_400);
+  const h = Math.floor((total % 86_400) / 3_600);
+  if (d > 0) return `${d}d${h}h`;
+  if (h > 0) return `${h}h${Math.floor((total % 3_600) / 60)}m`;
+  return minsSecs(total * 1000);
+};
 const unrefTimer = (t: ReturnType<typeof setTimeout>) => {
   (t as unknown as { unref?: () => void }).unref?.();
 };
@@ -207,6 +216,9 @@ export class Quonfig {
   // fresh network install clears it. Surfaced via the `stale` getter and
   // getDetails reason STALE.
   private _stale = false;
+  // When the cached last-known-good copy being served was written (epoch ms),
+  // if known: names its age in the section C start line.
+  private _cacheSavedAt: number | undefined;
   private _subscribers: Set<() => void> = new Set();
   // Bootstrap (globalThis._quonfigBootstrap) is a ONE-SHOT init seed: an SSR
   // snapshot used to paint instantly on the first load() without a network
@@ -577,6 +589,16 @@ export class Quonfig {
             if (legErrs) lastErrs = legErrs;
             if (!settled) {
               this._initFailedOnce = true;
+              // Section C: starting on the cache is a degraded start and must
+              // be visible above DEBUG. Logged once; later cache-fallback
+              // attempts are covered by the background "serving cache" WARN.
+              if (this._stale) {
+                console.warn(
+                  `[quonfig] init: config not loaded from delivery. onInitFailure=${mode}: ` +
+                    `STARTING ON ${this.cachedConfigLabel()}. This instance may disagree with the rest ` +
+                    `of your fleet. Retrying in background.${errsPart()}`
+                );
+              }
               finish();
             }
             scheduleNext(rejection !== undefined);
@@ -596,6 +618,19 @@ export class Quonfig {
         if (!current()) return followNewer();
         if (settled || this._ready) return;
         const elapsed = secs(Date.now() - startedAt);
+        // An attempt still in flight (a hanging network) has not reached the
+        // cached copy yet. A cache counts as config in every mode, so start on
+        // it now rather than on code defaults (or a rejection).
+        if (this.installCachedCopy()) {
+          this._initFailedOnce = true;
+          console.warn(
+            `[quonfig] init: no config after ${elapsed}. onInitFailure=${mode}: STARTING ON ` +
+              `${this.cachedConfigLabel()}. This instance may disagree with the rest of your fleet. ` +
+              `Retrying in background.`
+          );
+          finish();
+          return;
+        }
         if (mode === "fail") {
           const message =
             `[quonfig] init FAILED: no config after ${elapsed}.${errsPart()} onInitFailure=fail: ` +
@@ -624,6 +659,31 @@ export class Quonfig {
     });
     this._latestInit = promise;
     return promise;
+  }
+
+  /**
+   * Install the cached last-known-good copy for the current context (stale),
+   * if one exists and nothing live is held. Returns whether the client now
+   * serves the cache.
+   */
+  private installCachedCopy(): boolean {
+    if (!this.loader || this._ready) return false;
+    if (!this._stale) {
+      const cached = this.loader.readLastKnownGood(this._contexts);
+      if (!cached) return false;
+      this.applyLoaderResult(
+        { notModified: false, payload: cached.payload, stale: true, savedAt: cached.savedAt },
+        encodeContexts(this._contexts)
+      );
+    }
+    return this._stale;
+  }
+
+  /** "CACHED CONFIG from <age> ago", or "(age unknown)" for a copy written without a timestamp. */
+  private cachedConfigLabel(): string {
+    return this._cacheSavedAt === undefined
+      ? "CACHED CONFIG (age unknown)"
+      : `CACHED CONFIG from ${ageLabel(Date.now() - this._cacheSavedAt)} ago`;
   }
 
   /** Stop the init/background retry loop (it does not settle a pending init()). */
@@ -890,6 +950,7 @@ export class Quonfig {
         // too" holds without a separate check. A served-stale payload is
         // already in the cache, so it is not re-persisted.
         this._stale = result.stale === true;
+        this._cacheSavedAt = result.stale ? result.savedAt : undefined;
         if (!result.stale && this.loader) {
           writeLkg(this.loader.sdkKey, sig, {
             generation: this._heldGeneration,
