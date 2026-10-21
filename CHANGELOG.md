@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.6.0 - 2026-10-21
 
 > **UPGRADE (minor):** `init()` now retries for up to `initTimeout` (5s) before it rejects, where it
 > used to reject as soon as one hedged attempt failed. The default stays `onInitFailure: "fail"`
