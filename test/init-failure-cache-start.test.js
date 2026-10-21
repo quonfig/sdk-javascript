@@ -124,7 +124,7 @@ describe("init on a cached last-known-good copy logs per section C", () => {
     expect(start.length).toBe(1);
     expect(start[0].level).toBe("warn");
     expect(start[0].msg).toMatch(
-      /^\[quonfig\] init: config not loaded from delivery\. onInitFailure=fail: STARTING ON CACHED CONFIG from 1m30s ago\. This instance may disagree with the rest of your fleet\. Retrying in background\. primary=primary\.quonfig-staging\.com: fetch failed; secondary=secondary\.quonfig-staging\.com: fetch failed\.$/
+      /^\[quonfig\] init: config not loaded from delivery\. onInitFailure=fail: STARTING ON CACHED CONFIG from 1m30s ago\. This instance may disagree with the rest of your fleet\. Retrying in background\. primary=primary\.quonfig-staging\.com: network error; secondary=secondary\.quonfig-staging\.com: network error\.$/
     );
 
     // Later cache-fallback attempts do not repeat it; the 30s background WARN covers them.

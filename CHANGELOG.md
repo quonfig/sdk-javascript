@@ -14,8 +14,22 @@
   `"unauthorized"`), `"wait"` keeps `init()` pending until config arrives, and `"continue"` resolves
   on code defaults. A cached last-known-good copy or an SSR bootstrap resolves `init()` at once in
   every mode. Until the timeout, attempts repeat with jittered backoff (0.5s, 1s, 2s, ..., capped at
-  30s). A key the primary rejects (401/403/404/410 on every leg) rejects `"fail"` and resolves
-  `"continue"` at once; `"wait"` keeps retrying. An unknown value warns once and uses `"fail"`.
+  30s). A key every leg rejects (401/403/404/410) rejects `"fail"` and resolves `"continue"` at
+  once; `"wait"` keeps retrying. An unknown value warns once and uses `"fail"`.
+- **Cross-SDK init conformance (qfg-9p4i.17.7, qfg-9p4i.16).**
+  - `init()` decides `"unauthorized"` only when every configured leg answered 401/403/404/410, never
+    from the primary alone; the line reads `SDK key rejected (<status>) by primary and secondary`.
+    Under `"wait"` it logs at WARN, not ERROR.
+  - `QuonfigInitError.reason` is `"timeout"` when the last attempt hung (every leg timed out) or
+    none completed, `"unavailable"` otherwise (was: `"unavailable"` once any attempt had failed).
+  - `initTimeout <= 0` runs exactly one attempt and then applies `onInitFailure` (was: `0` decided
+    before any fetch could finish; negatives silently became 5000ms). `NaN`/`Infinity` warn and use
+    5000ms.
+  - Init log lines, the init error message and its `cause` carry hosts and `HTTP <status>` only:
+    fetch errors that quote the request URL (credentials, encoded context) become `network error`,
+    and payload/JSON errors no longer echo the response body.
+  - `stopPolling()` no longer stops the init/background retry, so a pending `init()` under `"wait"`
+    can no longer hang forever.
 - **New: `isReady()` and `error`.** `isReady()` is true once live config for the current context is
   installed or confirmed (false while serving a cached copy or defaults). `error` holds the
   `QuonfigInitError` the latest `init()` rejected with and clears on heal. Subscribers are notified
@@ -25,7 +39,7 @@
   rejection, `"continue"`, or a stale cached copy) keeps retrying in the background with the same
   backoff and heals: it installs the config, `isReady()` turns true, and one
   `[quonfig] init recovered` line is logged at INFO. `poll()` takes over that retry when started,
-  and `close()`/`stopPolling()` stop it.
+  `stopPolling()` hands it back, and `close()` stops it.
 - **Logging (design doc section C).** One WARN on the first failed attempt naming each leg's host
   and error (`primary=<host>: <error>; secondary=<host>: <error>`, never the key), progress WARNs,
   an ERROR at the `"fail"` timeout, a WARN at the `"continue"`/`"wait"` timeout, and "still not

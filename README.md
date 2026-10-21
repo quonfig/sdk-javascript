@@ -45,7 +45,18 @@ succeeds. With neither, `onInitFailure` decides:
 | `"wait"`           | `init()` stays pending and keeps retrying until config lands   |
 | `"continue"`       | `init()` resolves; `get()` returns `undefined` (code defaults) |
 
-A key the primary rejects (401/403/404/410 on every leg) ends `"fail"` and `"continue"` at once. In
+`initTimeout: 0` (or any negative value) runs exactly one attempt and then applies `onInitFailure`:
+it never means "no deadline", and it never decides before that attempt finishes. Use
+`onInitFailure: "wait"` for no deadline. A non-numeric, `NaN` or `Infinity` value warns and uses
+5000ms.
+
+`error.reason` is `"timeout"` when the last attempt hung (every leg in it timed out),
+`"unavailable"` when it failed fast (refused, DNS, 5xx), and `"unauthorized"` when every configured
+leg rejected the key. Log lines and the error message name each leg by host and `HTTP <status>` (or
+a short class such as `network error`); they never carry the SDK key, URL credentials or response
+bodies.
+
+A key that every configured leg rejects (401/403/404/410) ends `"fail"` and `"continue"` at once. In
 every mode the client keeps retrying in the background until it has live config, then installs it,
 notifies subscribers and logs one `[quonfig] init recovered` line. `isReady()` tells you whether the
 client holds live config, and `quonfig.error` holds the `QuonfigInitError` (cleared on heal):
@@ -65,7 +76,9 @@ await quonfig.init({ sdkKey: "your-frontend-sdk-key", context, onInitFailure: "c
 if (!quonfig.isReady()) console.warn("serving cached/default flags");
 ```
 
-`poll()` takes over the background retry when you start it.
+`poll()` takes over the background retry when you start it. `stopPolling()` hands it back: a client
+that is not ready yet (including a pending `init()` under `"wait"`) keeps retrying. Only `close()`
+stops it.
 
 ### Invalid or revoked SDK key
 
