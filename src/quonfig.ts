@@ -475,6 +475,8 @@ export class Quonfig {
       let authLogged = false;
       let nextProgressAt = startedAt + INIT_PROGRESS_MS;
       let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+      // initTimeout <= 0: the policy applies once, after the first attempt.
+      let oneAttemptPolicyApplied = false;
 
       const current = () => initGeneration === this._initGeneration;
       const looping = () => current() && loopGeneration === this._retryGeneration;
@@ -639,7 +641,12 @@ export class Quonfig {
           () => {
             completed();
             if (!current()) return followNewer();
-            if (!live()) return;
+            if (!live()) {
+              // A poll() superseded this attempt and settled it with its own
+              // load: that load was the one attempt.
+              applyOneAttemptPolicy();
+              return;
+            }
             if (this._ready) {
               finish();
               return;
@@ -667,11 +674,16 @@ export class Quonfig {
           (error) => {
             completed();
             if (!current()) return followNewer();
-            if (!live()) return;
+            if (!live()) {
+              if (legErrs) lastErrs = legErrs;
+              lastError = error;
+              applyOneAttemptPolicy();
+              return;
+            }
             lastErrs = legErrs || safeErrorText(error);
             onFailedAttempt(error, rejection);
             // initTimeout <= 0: one attempt, then the policy (decision 8).
-            if (initTimeout <= 0 && attempt === 1 && !settled) onDeadline();
+            applyOneAttemptPolicy();
             scheduleNext(rejection !== undefined);
           }
         );
@@ -731,6 +743,13 @@ export class Quonfig {
           );
           nextProgressAt = Date.now() + WAIT_PROGRESS_MS;
         }
+      };
+      // initTimeout <= 0 (decision 8): no timer; the policy applies once the
+      // first attempt ends, including one a poll() superseded.
+      const applyOneAttemptPolicy = () => {
+        if (initTimeout > 0 || oneAttemptPolicyApplied || settled) return;
+        oneAttemptPolicyApplied = true;
+        onDeadline();
       };
       if (initTimeout > 0) deadlineTimer = setTimeout(onDeadline, initTimeout);
 

@@ -308,6 +308,29 @@ describe("init-failure conformance (qfg-9p4i.17.7)", () => {
       expect(init.error).toBeUndefined();
     });
 
+    test("0 + fail: poll() started right after init() still applies the policy after one attempt", async () => {
+      legs({
+        primary: () => delayed(100, (_, reject) => reject(new TypeError("fetch failed"))),
+        secondary: () => delayed(100, (_, reject) => reject(new TypeError("fetch failed"))),
+      });
+      q = new Quonfig();
+      const init = track(q.init(opts({ initTimeout: 0 })));
+      q.poll({ frequencyInMs: 60_000 }).catch(() => {});
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(init.settled).toBe(true);
+      expect(init.error).toBeInstanceOf(QuonfigInitError);
+    });
+
+    test("0 + continue: poll() started right after init() still resolves on defaults", async () => {
+      legs({ primary: refused, secondary: refused });
+      q = new Quonfig();
+      const init = track(q.init(opts({ initTimeout: 0, onInitFailure: "continue" })));
+      q.poll({ frequencyInMs: 60_000 }).catch(() => {});
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(init.settled).toBe(true);
+      expect(init.error).toBeUndefined();
+    });
+
     test("a non-finite initTimeout warns and falls back to the 5s default", async () => {
       legs({ primary: refused, secondary: refused });
       q = new Quonfig();
