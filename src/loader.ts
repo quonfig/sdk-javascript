@@ -66,16 +66,50 @@ export const AUTH_CLASS_STATUSES: ReadonlySet<number> = new Set([401, 403, 404, 
 /**
  * A fetch cycle in which every leg failed and the primary (first) leg answered
  * with an auth-class status (R2). `host` is the primary's host[:port]; it
- * never carries the SDK key (sent in a header, not the URL).
+ * never carries the SDK key (sent in a header, not the URL). `allLegs` is true
+ * when EVERY configured leg answered auth-class: init decides "unauthorized"
+ * only then (design doc decision 6), while the poller's auth-failed state keys
+ * off the primary (R2).
  */
-export type AuthRejection = { status: number; host: string };
+export type AuthRejection = { status: number; host: string; allLegs?: boolean };
 
-const hostOf = (apiUrl: string): string => {
+/**
+ * A leg failure whose message is safe for logs and the init error: it carries
+ * no URL (so no userinfo and no encoded context) and no upstream response body
+ * (design doc decision 9). `timedOut` marks the per-leg timeout abort.
+ */
+export class LegError extends Error {
+  readonly timedOut: boolean;
+
+  constructor(message: string, timedOut = false) {
+    super(message);
+    this.name = "LegError";
+    this.timedOut = timedOut;
+    Object.setPrototypeOf(this, LegError.prototype);
+  }
+}
+
+// host[:port] only: URL userinfo, path and query never reach a log line.
+export const hostOf = (apiUrl: string): string => {
   try {
     return new URL(apiUrl).host;
   } catch {
-    return apiUrl;
+    return "(invalid url)";
   }
+};
+
+/**
+ * A short, log-safe text for any leg error. Errors the loader raised itself
+ * (LegError) are already safe. Anything else (an install that threw) keeps
+ * only its class, with any URL reduced to its host.
+ */
+export const safeErrorText = (error: unknown): string => {
+  if (error instanceof LegError) return error.message;
+  if (error instanceof Error) {
+    const text = error.message.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => hostOf(url));
+    return `${error.name}: ${text}`.slice(0, 200);
+  }
+  return "error";
 };
 
 export default class Loader {
@@ -194,12 +228,18 @@ export default class Loader {
    * `onAllFailed` is called once, synchronously, when every leg failed (before
    * any last-known-good fallback), with one `primary=<host>: <error>` /
    * `secondary=<host>: <error>` entry per failed leg joined by "; ". It carries
-   * hosts only, never the SDK key.
+   * hosts and short error classes only, never the SDK key, URL userinfo or an
+   * upstream body.
+   *
+   * `onLegFailed` is called once per failed leg (not for a superseded call),
+   * with whether that leg ended on its per-leg timeout. The init path uses it to
+   * tell a hung attempt from a fast failure (design doc decision 7).
    */
   loadHedged(
     onResult: (result: LoaderResult) => void,
     onAuthRejected?: (rejection: AuthRejection) => void,
-    onAllFailed?: (legErrors: string) => void
+    onAllFailed?: (legErrors: string) => void,
+    onLegFailed?: (timedOut: boolean) => void
   ): Promise<void> {
     const previous = this.supersedeCurrent;
     // Abort the previous call's legs; `previous` below makes it inert before any
@@ -225,9 +265,9 @@ export default class Loader {
       // pending and nothing ever succeeded.
       let moreLegsPossible = secondaryUrls.length > 0;
       let lastError: unknown;
-      // HTTP status of the primary leg's response (0 = no response yet, or
-      // none: a network error or a timeout).
-      let primaryStatus = 0;
+      // HTTP status of each leg's response, by apiUrl (absent = no response:
+      // a network error or a timeout).
+      const legStatus = new Map<string, number>();
       let hedgeTimer: ReturnType<typeof setTimeout> | undefined;
       // One `role=host: message` entry per failed leg, in failure order, for the
       // init log lines (design doc section C). Hosts only: the SDK key travels in
@@ -235,8 +275,8 @@ export default class Loader {
       const legErrors: string[] = [];
       const noteLegError = (apiUrl: string, error: unknown) => {
         const role = apiUrl === primaryUrl ? "primary" : "secondary";
-        const message = error instanceof Error ? error.message : String(error);
-        legErrors.push(`${role}=${hostOf(apiUrl)}: ${message}`);
+        legErrors.push(`${role}=${hostOf(apiUrl)}: ${safeErrorText(error)}`);
+        onLegFailed?.(error instanceof LegError && error.timedOut);
       };
 
       const settle = () => {
@@ -244,8 +284,10 @@ export default class Loader {
         // Entry is decided from the primary's status before last-known-good is
         // considered. A 200/304 on any leg makes sawSuccess true and never
         // reaches here.
+        const primaryStatus = legStatus.get(primaryUrl) ?? 0;
         if (onAuthRejected && AUTH_CLASS_STATUSES.has(primaryStatus)) {
-          onAuthRejected({ status: primaryStatus, host: hostOf(primaryUrl) });
+          const allLegs = this.apiUrls.every((u) => AUTH_CLASS_STATUSES.has(legStatus.get(u) ?? 0));
+          onAuthRejected({ status: primaryStatus, host: hostOf(primaryUrl), allLegs });
         }
         onAllFailed?.(legErrors.join("; "));
         // Every leg failed and nothing succeeded. Before giving up, serve the
@@ -271,7 +313,9 @@ export default class Loader {
 
       const startLeg = (apiUrl: string) => {
         pending += 1;
-        this.fetchFromUrl(apiUrl, contexts)
+        this.fetchFromUrl(apiUrl, contexts, (status) => {
+          legStatus.set(apiUrl, status);
+        })
           .then((result) => {
             if (superseded) return;
             // sawSuccess only after onResult returns: a throwing install counts
@@ -307,7 +351,7 @@ export default class Loader {
       // Primary leg.
       pending += 1;
       this.fetchFromUrl(primaryUrl, contexts, (status) => {
-        primaryStatus = status;
+        legStatus.set(primaryUrl, status);
       })
         .then((result) => {
           if (superseded) return;
@@ -414,6 +458,7 @@ export default class Loader {
       this.inFlight.add(controller);
       const { signal } = controller;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let timedOut = false;
       const cleanup = () => {
         if (timeoutId) clearTimeout(timeoutId);
         this.inFlight.delete(controller);
@@ -450,17 +495,23 @@ export default class Loader {
               // quirk), drop any entry so the next poll does a full GET, and
               // surface an error so this URL fails over / retries.
               this.cache.delete(url);
-              throw new Error("304 Not Modified with no cached payload");
+              throw new LegError("HTTP 304 with no cached payload");
             }
             return undefined;
           }
 
           if (!response.ok) {
-            throw new Error(`${response.status} ${response.statusText}`);
+            // Status only: the statusText and body are upstream-controlled.
+            throw new LegError(`HTTP ${response.status}`);
           }
 
           responseEtag = response.headers.get("ETag");
-          return response.json();
+          // A parse error can quote the body (a captive portal's HTML); keep
+          // only the fact (design doc decision 9).
+          return response.json().catch((error: unknown) => {
+            if (signal.aborted) throw error;
+            throw new LegError(`HTTP ${response.status}: invalid JSON body`);
+          });
         })
         .then((data) => {
           // The 304 branch resolved already and returns undefined here.
@@ -469,7 +520,8 @@ export default class Loader {
           }
 
           if (!("evaluations" in data)) {
-            throw new Error(`Invalid payload: ${JSON.stringify(data)}`);
+            // Never echo the body: it may be a proxy's or a portal's JSON.
+            throw new LegError("Invalid payload: no evaluations");
           }
 
           const payload = data as EvaluationPayload;
@@ -485,8 +537,14 @@ export default class Loader {
 
           resolve({ notModified: false, payload });
         })
-        .catch((error) => {
-          reject(error);
+        .catch((error: unknown) => {
+          // Reduce transport errors at the source: fetch's own messages can
+          // quote the full request URL (userinfo, encoded context).
+          if (error instanceof LegError) reject(error);
+          else if (timedOut) reject(new LegError(`timeout after ${this.timeout}ms`, true));
+          else if (signal.aborted) reject(new LegError("aborted"));
+          else if (error instanceof TypeError) reject(new LegError("network error"));
+          else reject(new LegError(safeErrorText(error)));
         })
         // Clean up only once the body is parsed (or the leg failed): the
         // timeout and the supersede-abort must cover the body read too, or a
@@ -494,6 +552,7 @@ export default class Loader {
         .finally(cleanup);
 
       timeoutId = setTimeout(() => {
+        timedOut = true;
         controller.abort();
       }, this.timeout);
     });

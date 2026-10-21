@@ -223,16 +223,21 @@ export type InitOptions = {
    * - `"continue"`: resolve; reads return code defaults (`get()` is `undefined`).
    *
    * Before the timeout every mode retries (jittered backoff 0.5s, 1s, 2s, ...,
-   * capped at 30s). A key the primary rejects (401/403/404/410 on every leg)
+   * capped at 30s). A key that every configured leg rejects (401/403/404/410)
    * ends `fail` and `continue` at once. In every mode a client that is not yet
    * ready keeps retrying in the background and heals: `isReady()` turns true
-   * and subscribers are notified. `poll()` takes over that retry when started.
+   * and subscribers are notified. `poll()` takes over that retry when started;
+   * `stopPolling()` hands it back; `close()` stops it.
    */
   onInitFailure?: OnInitFailure;
   /**
    * Overall deadline (ms) for `init()` to obtain config before
    * {@link onInitFailure} applies. Default 5000. Separate from the per-leg
    * {@link timeout}, which bounds each fetch attempt.
+   *
+   * `0` or a negative value runs exactly ONE attempt and then applies
+   * `onInitFailure` (it is not "no deadline"; use `onInitFailure: "wait"` for
+   * that). `NaN`, `Infinity` and non-numbers warn and use the default.
    */
   initTimeout?: number;
   afterEvaluationCallback?: EvaluationCallback;

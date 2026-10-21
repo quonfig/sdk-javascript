@@ -6,10 +6,14 @@ export type QuonfigInitErrorReason = "timeout" | "unavailable" | "unauthorized";
  * Quonfig config is available: no live answer and no cached last-known-good
  * copy for the context (project/plans/2026-10-05-init-failure-design.md B.4).
  *
- * - `timeout`: no fetch attempt finished before `initTimeout` (the network hangs).
- * - `unavailable`: every attempt until `initTimeout` failed (refused, DNS, 5xx).
- * - `unauthorized`: the primary rejected the SDK key (401/403/404/410) and every
- *   leg failed. Raised at once, without waiting out `initTimeout`.
+ * - `timeout`: the last attempt hung (every leg in it timed out, or was still
+ *   pending at `initTimeout`), or no attempt completed.
+ * - `unavailable`: the last attempt failed fast on some leg (refused, DNS, 5xx).
+ * - `unauthorized`: every configured leg rejected the SDK key (401/403/404/410).
+ *   Raised at once, without waiting out `initTimeout`.
+ *
+ * The message (and `cause`) name legs by host and `HTTP <status>` only: never
+ * the SDK key, URL credentials or a response body.
  *
  * The client keeps retrying in the background after this rejection and heals
  * when the network returns (`isReady()` turns true, subscribers are notified).
