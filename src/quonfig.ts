@@ -1413,6 +1413,21 @@ export class Quonfig {
   }
 
   /**
+   * Read the evaluated value for a config key without counting it as an
+   * evaluation: no evaluation summary is recorded, `afterEvaluationCallback`
+   * does not fire, and nothing is logged before the client has loaded (the
+   * result is then `undefined`). For framework bindings that read a snapshot
+   * more often than the application consumes the value, such as React's
+   * `useSyncExternalStore`. Application code should use `get()`.
+   */
+  peek(key: string): ConfigValue {
+    if (!this.loaded) {
+      return undefined;
+    }
+    return this.configs[key]?.value;
+  }
+
+  /**
    * Get the evaluated value for a config key.
    */
   get(key: string): ConfigValue {
