@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **New: `peek(key)` (qfg-6vno.10).** Returns the same value as `get(key)` but records no evaluation
+  summary and does not fire `afterEvaluationCallback` (before load it returns `undefined` without a
+  warning). It is for bindings that read a snapshot more often than the application uses the value,
+  such as `@quonfig/react`'s `useSyncExternalStore`. `get()` is unchanged.
+
 ## 1.6.0 - 2026-10-21
 
 > **UPGRADE (minor):** `init()` now retries for up to `initTimeout` (5s) before it rejects, where it
