@@ -113,7 +113,7 @@ export class EvaluationSummaryAggregator {
     this.maxKeys = maxKeys;
   }
 
-  record(config: Config): void {
+  record(config: Config | undefined, count = 1): void {
     if (!this.enabled || !config?.configEvaluationMetadata) return;
 
     // Hot path: a Config read again in the same window bumps its cached
@@ -122,7 +122,7 @@ export class EvaluationSummaryAggregator {
     // computed once per installed Config, not once per get() (qfg-23uf).
     let slot = this.slots.get(config);
     if (slot?.window === this.window && slot.counter) {
-      slot.counter.count += 1;
+      slot.counter.count += count;
       return;
     }
 
@@ -146,7 +146,7 @@ export class EvaluationSummaryAggregator {
     }
     slot.window = this.window;
     slot.counter = counter;
-    counter.count += 1;
+    counter.count += count;
   }
 
   /** Stop recording and clear the window (telemetry disabled, P3). */

@@ -85,6 +85,19 @@ const buildFlagMetadata = (
  * output of extract(): a { ms, seconds } object is a duration, a string array
  * a string_list, any other object json.
  */
+// Cap on distinct Configs buffered before init(); reads of Configs already
+// buffered keep counting (qfg-27wr).
+const PRE_INIT_READS_MAX = 10_000;
+
+/** Stable comparison key for a config value (hydrated vs network). */
+const valueSignature = (value: unknown): string => {
+  try {
+    return JSON.stringify(value) ?? "undefined";
+  } catch {
+    return String(value);
+  }
+};
+
 const hydratedType = (value: unknown): string => {
   if (typeof value === "boolean") return "bool";
   if (typeof value === "number") return Number.isInteger(value) ? "int" : "double";
@@ -192,6 +205,16 @@ export class Quonfig {
   private _instanceHash: string | undefined;
   private _collectEvaluationSummaries = true;
   private evaluationSummaryAggregator: EvaluationSummaryAggregator | undefined;
+  // qfg-27wr: Configs built by hydrate() carry no evaluation metadata, so the
+  // aggregator cannot record them. Reads of them are held here, per key with
+  // a count (bounded by the hydrated key set), and recorded against the first
+  // network Config installed for that key when its value matches.
+  private _hydratedConfigs: WeakSet<Config> = new WeakSet();
+  private _heldHydratedReads: Map<string, { sig: string; count: number }> = new Map();
+  // Reads made before init() wires telemetry, per Config with a count; drained
+  // (recorded + afterEvaluationCallback) once init() installs both.
+  private _telemetryWired = false;
+  private _preInitReads: Map<Config, number> = new Map();
   private telemetryReporter: TelemetryReporter | undefined;
   private pageHideListener: (() => void) | undefined;
   private _contexts: Contexts = {};
@@ -397,6 +420,8 @@ export class Quonfig {
     }
 
     this.afterEvaluationCallback = afterEvaluationCallback;
+    this._telemetryWired = true;
+    this.flushPreInitReads();
 
     let mode: OnInitFailure = "fail";
     if (onInitFailure !== undefined) {
@@ -1312,6 +1337,8 @@ export class Quonfig {
     this.stopInitRetry();
     const reporter = this.telemetryReporter;
     this.removePageHideListener();
+    // Hydrated reads whose network Config never arrived are dropped (qfg-27wr).
+    this._heldHydratedReads.clear();
     await reporter?.close();
   }
 
@@ -1374,6 +1401,7 @@ export class Quonfig {
     this._heldGeneration = rawValues?.meta?.generation ?? 0;
     this._configInstalls += 1;
     this.loaded = true;
+    this.resolveHeldHydratedReads();
     this.notifySubscribers();
   }
 
@@ -1385,7 +1413,9 @@ export class Quonfig {
     const configs: { [key: string]: Config } = Object.assign(Object.create(null), this._configs);
     Object.keys(flags).forEach((key) => {
       const value = flags[key] as ConfigValue;
-      configs[key] = new Config(key, value, hydratedType(value));
+      const config = new Config(key, value, hydratedType(value));
+      this._hydratedConfigs.add(config);
+      configs[key] = config;
     });
     this._configs = configs;
     this.loaded = true;
@@ -1410,6 +1440,90 @@ export class Quonfig {
    */
   isEnabled(key: string): boolean {
     return this.get(key) === true;
+  }
+
+  /**
+   * Count one evaluation of `key` (its Config is undefined for a missing key)
+   * and, when `fireCallback`, schedule afterEvaluationCallback. Before init()
+   * has wired telemetry, a read of a Config is buffered and replayed by
+   * flushPreInitReads() with the callback init() installs.
+   */
+  private recordEvaluation(key: string, config: Config | undefined, fireCallback = true): void {
+    if (config && !this._telemetryWired) {
+      if (fireCallback) {
+        const seen = this._preInitReads.get(config);
+        if (seen !== undefined) this._preInitReads.set(config, seen + 1);
+        else if (this._preInitReads.size < PRE_INIT_READS_MAX) this._preInitReads.set(config, 1);
+      }
+      return;
+    }
+    if (config) this.recordToAggregator(config, 1);
+    if (fireCallback) {
+      const value = config?.value;
+      // afterEvaluationCallback is user-supplied — keep it deferred so a
+      // throwing or slow callback can't block the calling get().
+      setTimeout(() => this.afterEvaluationCallback(key, value, this._contexts));
+    }
+  }
+
+  /** Record `count` reads of `config`, holding hydrated (metadata-less) ones. */
+  private recordToAggregator(config: Config, count: number): void {
+    if (!this._collectEvaluationSummaries || !this.evaluationSummaryAggregator) return;
+    if (this._hydratedConfigs.has(config)) {
+      const sig = valueSignature(config.value);
+      const held = this._heldHydratedReads.get(config.key);
+      if (held && held.sig === sig) {
+        held.count += count;
+      } else {
+        // A re-hydrate with a new value supersedes reads of the old one.
+        this._heldHydratedReads.set(config.key, { sig, count });
+      }
+      return;
+    }
+    this.evaluationSummaryAggregator.record(config, count);
+  }
+
+  /**
+   * Replay reads made before init(): record them and fire the
+   * afterEvaluationCallback init() installed, once per read.
+   */
+  private flushPreInitReads(): void {
+    if (this._preInitReads.size === 0) return;
+    const reads = this._preInitReads;
+    this._preInitReads = new Map();
+    reads.forEach((count, config) => {
+      this.recordToAggregator(config, count);
+    });
+    this.resolveHeldHydratedReads();
+    setTimeout(() => {
+      reads.forEach((count, config) => {
+        for (let i = 0; i < count; i++) {
+          this.afterEvaluationCallback(config.key, config.value, this._contexts);
+        }
+      });
+    });
+  }
+
+  /**
+   * After a network install, settle held hydrated reads: a key whose new
+   * Config has the same value is recorded with that Config's metadata; a
+   * different value, or a key the install does not carry, drops them. Keys
+   * still served by their hydrated Config stay held.
+   */
+  private resolveHeldHydratedReads(): void {
+    if (this._heldHydratedReads.size === 0) return;
+    this._heldHydratedReads.forEach((held, key) => {
+      const config = this._configs[key];
+      if (config && this._hydratedConfigs.has(config)) return;
+      this._heldHydratedReads.delete(key);
+      if (
+        config?.configEvaluationMetadata &&
+        valueSignature(config.value) === held.sig &&
+        this._collectEvaluationSummaries
+      ) {
+        this.evaluationSummaryAggregator?.record(config, held.count);
+      }
+    });
   }
 
   /**
@@ -1444,16 +1558,11 @@ export class Quonfig {
     const value = config?.value;
 
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
-      if (this._collectEvaluationSummaries) {
-        // qfg-5jcd: record synchronously. record() is a Map.set + counter
-        // increment with no I/O; deferring it via setTimeout(0) caused a tight
-        // sync get()-loop followed by await close() to race past the records
-        // and ship empty telemetry. Matches sdk-node/src/quonfig.ts.
-        this.evaluationSummaryAggregator?.record(config);
-      }
-      // afterEvaluationCallback is user-supplied — keep it deferred so a
-      // throwing or slow callback can't block the calling get().
-      setTimeout(() => this.afterEvaluationCallback(key, value, this._contexts));
+      // qfg-5jcd: record synchronously. record() is a Map.set + counter
+      // increment with no I/O; deferring it via setTimeout(0) caused a tight
+      // sync get()-loop followed by await close() to race past the records
+      // and ship empty telemetry. Matches sdk-node/src/quonfig.ts.
+      this.recordEvaluation(key, config);
     }
 
     return value;
@@ -1492,8 +1601,8 @@ export class Quonfig {
     }
 
     if (config.coercionError) {
-      if (!key.startsWith(LOG_LEVEL_KEY_PREFIX) && this._collectEvaluationSummaries) {
-        this.evaluationSummaryAggregator?.record(config);
+      if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
+        this.recordEvaluation(key, config, false);
       }
       return {
         value: undefined,
@@ -1526,10 +1635,7 @@ export class Quonfig {
     const reason: EvaluationReason = this._stale ? "STALE" : underlyingReason;
 
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
-      if (this._collectEvaluationSummaries) {
-        this.evaluationSummaryAggregator?.record(config);
-      }
-      setTimeout(() => this.afterEvaluationCallback(key, config.value, this._contexts));
+      this.recordEvaluation(key, config);
     }
 
     return {
