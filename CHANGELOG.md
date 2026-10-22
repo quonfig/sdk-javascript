@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.8.0 - 2026-10-22
+
+- **Reads of hydrated values are now counted (qfg-27wr).** Values seeded with `hydrate()` (e.g. SSR
+  `initialFlags`) carry no evaluation metadata, so `get()`/`getDetails()` reads of them were
+  silently dropped from evaluation telemetry. They are now held, as a per-key count, and recorded
+  against the first network config installed for that key, with that config's metadata, when the
+  values match. If the network value differs, the key is missing from the next install, or no
+  network config arrives before `close()`, the held reads are dropped. `peek()` still records
+  nothing. No wire or public API change.
+- **Reads made before `init()` are recorded (qfg-27wr).** A `setConfig()` or `hydrate()` followed by
+  `get()` before `init()` used to record nothing. Those reads are now buffered (per config, with a
+  count) and recorded once `init()` sets up telemetry, and `afterEvaluationCallback` fires once per
+  read with the callback passed to `init()`.
+
 ## 1.7.0 - 2026-10-22
 
 - **New: `peek(key)` (qfg-6vno.10).** Returns the same value as `get(key)` but records no evaluation
