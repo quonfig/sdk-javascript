@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0 - 2026-10-22
 
 - **New: `peek(key)` (qfg-6vno.10).** Returns the same value as `get(key)` but records no evaluation
   summary and does not fire `afterEvaluationCallback` (before load it returns `undefined` without a
