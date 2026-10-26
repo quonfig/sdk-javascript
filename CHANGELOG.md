@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.0.0 - unreleased
+
+The typed-getter contract (qfg-zvyy), shared by every Quonfig SDK and pinned by the
+integration-test-data matrix (`getter.contract.*`; this SDK runs a port of it in
+`test/typed-getter-contract.test.js`), and a context switch that never serves the previous user's
+values (qfg-xiub).
+
+### UPGRADE to 2.0
+
+1. **`getDuration` no longer throws.** On a config that is not a duration (another type, including a
+   stored string such as `"PT1S"`) it returns your default instead of throwing
+   `Value for key "..." is not a duration`. It takes an optional default:
+   `getDuration(key, defaultValue)`. Without one it returns `undefined`. Remove any `try/catch` you
+   wrapped around it; code that relied on the throw to detect a misconfigured key should check for
+   the default instead (the SDK also logs one warning per key).
+2. **`isEnabled` is true only for a boolean `true`.** A `json` config whose value is `true` used to
+   read as enabled; it now returns `false`. Strings were already `false` (`"true"` is never a bool)
+   and still are. `isEnabled` never throws, and now logs one warning per key when it returns `false`
+   because the key is missing or its value is not a boolean.
+3. **Values that don't match their declared type read as `undefined`.** A server value whose JSON
+   shape does not match its type (an `int` holding `"twelve"` or `3.5`, a `bool` holding `"true"`, a
+   `string_list` holding a non-array) used to pass through `get()` as-is. It now reads as
+   `undefined` (your default), `getDetails` reports `reason: "ERROR"`, `errorCode: "TYPE_MISMATCH"`,
+   and the SDK logs one warning per key. api-delivery does not send such values today; this is a
+   guard, not an expected path.
+4. **`updateContext` swaps what is served immediately.** It used to keep serving the previous
+   context's values until the new context's fetch landed, and kept them for good when that fetch
+   failed (reported as `TARGETING_MATCH`, not stale). Now the switch itself installs the cached
+   last-known-good copy for the new context (stale) or clears the config, and notifies subscribers,
+   before fetching. Between `updateContext()` and its fetch completing, reads return your defaults
+   unless this browser has a cached copy for the new context. `updateContext(ctx, true)` (skip load)
+   clears too. Re-sending the current context is a no-op. This matches sdk-swift.
+
+### Changed
+
+- `getDuration(key, defaultValue?)`: optional default; returns it for a missing key, a wrong-type
+  value or a malformed duration. Never throws.
+- `isEnabled(key)`: `true` only when the config type is `bool` and its value is `true`.
+- `get(key)`: `undefined` for a value whose shape does not match its declared type (logged once per
+  key).
+- `updateContext(context, skipLoad?)`: stops serving the previous context's values at once
+  (qfg-xiub).
+
 ## 1.8.0 - 2026-10-22
 
 - **Reads of hydrated values are now counted (qfg-27wr).** Values seeded with `hydrate()` (e.g. SSR
