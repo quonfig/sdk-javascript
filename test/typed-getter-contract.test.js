@@ -15,44 +15,7 @@ const { captureConsole } = require("./helpers/captureConsole");
 // int/double rows are not something api-delivery emits today; the client
 // must still treat them as failed reads rather than serve a string as a number.
 
-const STORED = {
-  bool: { type: "bool", value: true },
-  string: { type: "string", value: "fast" },
-  int: { type: "int", value: 30 },
-  double: { type: "double", value: 3.9 },
-  "double.whole": { type: "double", value: 3 },
-  "double.huge": { type: "double", value: 1e300 },
-  "double.unsafe": { type: "double", value: 9007199254740992 },
-  string_list: { type: "string_list", value: ["a", "b"] },
-  json: { type: "json", value: { a: 1 } },
-  duration: { type: "duration", value: "PT30S" },
-  "string.false": { type: "string", value: "false" },
-  "string.true": { type: "string", value: "true" },
-  "string.number": { type: "string", value: "3" },
-  "string.duration": { type: "string", value: "PT1S" },
-  "int.malformed": { type: "int", value: "twelve" },
-  "double.malformed": { type: "double", value: "abc" },
-};
-
-const KEY = (name) => `getter.contract.${name}`;
-
-const evaluationFor = (name) => ({
-  value: STORED[name],
-  configId: `cfg-${name}`,
-  configType: "config",
-  valueType: STORED[name].type,
-  reason: "STATIC",
-});
-
-const loadedClient = () => {
-  const q = new Quonfig();
-  const evaluations = {};
-  Object.keys(STORED).forEach((name) => {
-    evaluations[KEY(name)] = evaluationFor(name);
-  });
-  q.setConfig({ evaluations });
-  return q;
-};
+const { STORED, KEY, loadedClient } = require("./helpers/getterContractMatrix");
 
 const DEFAULT_DURATION = Object.freeze({ ms: 1234, seconds: 1.234 });
 

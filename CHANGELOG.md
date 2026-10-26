@@ -43,6 +43,15 @@ values (qfg-xiub).
 - `updateContext(context, skipLoad?)`: stops serving the previous context's values at once
   (qfg-xiub).
 
+### Not in this release
+
+This SDK has no typed getter family (`getString`, `getInt`, `getFloat`, `getBool`, …) and no
+`OrThrow` variants, so the matrix rows for those getters (including the int↔double conversions) have
+no surface here. Missing-env-var and decryption-failure rows are server-only: a provided or secret
+value is never sent to a frontend key. `test/itd-getter-contract.test.js` reads the matrix from
+integration-test-data, runs every `enabled` and `DURATION` row through the public client, and fails
+on any row it cannot classify, so a change to the shared matrix shows up here.
+
 ## 1.8.0 - 2026-10-22
 
 - **Reads of hydrated values are now counted (qfg-27wr).** Values seeded with `hydrate()` (e.g. SSR
