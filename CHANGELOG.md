@@ -42,6 +42,9 @@ values (qfg-xiub).
   key).
 - `updateContext(context, skipLoad?)`: stops serving the previous context's values at once
   (qfg-xiub).
+- Runtime dependency `uuid` raised from `^9.0.1` to `^11.1.1` (GHSA-w5hq-g745-h8pq, qfg-66ko.6;
+  thanks @jeremyw, #3). The SDK only calls `v4()`, whose signature is unchanged. `@types/uuid` is
+  dropped because uuid 11 ships its own types.
 
 ### Not in this release
 
