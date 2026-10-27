@@ -63,6 +63,27 @@ export const isDuration = (value: unknown): value is Duration =>
   typeof (value as Duration).seconds === "number";
 
 /**
+ * Whether a parsed server value has the JSON shape its declared type requires.
+ * Types this SDK does not check (json, log levels, future types) pass.
+ */
+const matchesDeclaredType = (type: string, value: unknown): boolean => {
+  switch (type) {
+    case "bool":
+      return typeof value === "boolean";
+    case "int":
+      return typeof value === "number" && Number.isInteger(value);
+    case "double":
+      return typeof value === "number" && Number.isFinite(value);
+    case "string":
+      return typeof value === "string";
+    case "string_list":
+      return Array.isArray(value) && value.every((v) => typeof v === "string");
+    default:
+      return true;
+  }
+};
+
+/**
  * Parse an EvaluatedValue from the server response into a native JS value.
  */
 const parseValue = (ev: EvaluatedValue, key: string): ConfigValue => {
@@ -131,6 +152,12 @@ export class Config {
     this.configEvaluationMetadata = metadata;
     if (type === "duration" && value === undefined && rawValue !== undefined) {
       this.coercionError = `Value for key "${key}" is not a valid ISO 8601 duration`;
+    } else if (rawValue !== undefined && !matchesDeclaredType(type, value)) {
+      // A server value whose JSON shape does not match its declared type (an
+      // "int" carrying "twelve", a "bool" carrying "true") is a failed read,
+      // never a coerced one (qfg-zvyy, qfg-zqoh). Never echoes the value.
+      this.value = undefined;
+      this.coercionError = `Value for key "${key}" is not a valid ${type}`;
     }
   }
 

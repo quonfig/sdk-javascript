@@ -239,6 +239,9 @@ export class Quonfig {
   // fresh network install clears it. Surfaced via the `stale` getter and
   // getDetails reason STALE.
   private _stale = false;
+  // True between a context switch that cleared the served config (no cached
+  // copy for the new context) and the next install (qfg-xiub).
+  private _awaitingSwitchedContext = false;
   // When the cached last-known-good copy being served was written (epoch ms),
   // if known: names its age in the section C start line.
   private _cacheSavedAt: number | undefined;
@@ -1139,6 +1142,7 @@ export class Quonfig {
 
     validateContexts(context);
     this._contexts = context;
+    this.switchServedContext(encodeContexts(context));
 
     if (skipLoad) {
       // No fetch now, but the next one (a poll() or poll tick) must be for this
@@ -1152,6 +1156,33 @@ export class Quonfig {
     }
 
     return this.load();
+  }
+
+  /**
+   * qfg-xiub: on a switch to another context, stop serving the previous
+   * context's values at once, before (and regardless of) the refetch: serve
+   * the new context's last-known-good copy (stale) when there is one, or
+   * nothing (caller defaults) until its fetch lands. Mirrors sdk-swift's
+   * updateContext. A no-op when `sig` is the context already served, or when
+   * nothing has been installed for any context yet.
+   */
+  private switchServedContext(sig: string): void {
+    if (this._loadedContextSig === undefined || this._loadedContextSig === sig) return;
+    const cached = this.loader?.readLastKnownGood(this._contexts);
+    if (cached) {
+      this.applyLoaderResult(
+        { notModified: false, payload: cached.payload, stale: true, savedAt: cached.savedAt },
+        sig
+      );
+      return;
+    }
+    this._configs = Object.create(null);
+    this._awaitingSwitchedContext = true;
+    this._loadedContextSig = undefined;
+    this._heldGeneration = 0;
+    this._stale = false;
+    this._cacheSavedAt = undefined;
+    this.notifySubscribers();
   }
 
   /**
@@ -1398,6 +1429,7 @@ export class Quonfig {
    */
   setConfig(rawValues: EvaluationPayload) {
     this._configs = Config.digest(rawValues);
+    this._awaitingSwitchedContext = false;
     this._heldGeneration = rawValues?.meta?.generation ?? 0;
     this._configInstalls += 1;
     this.loaded = true;
@@ -1418,6 +1450,7 @@ export class Quonfig {
       configs[key] = config;
     });
     this._configs = configs;
+    this._awaitingSwitchedContext = false;
     this.loaded = true;
     this.notifySubscribers();
   }
@@ -1436,10 +1469,36 @@ export class Quonfig {
   // -- Query Methods --
 
   /**
-   * Check if a feature flag is enabled. Returns false for any non-true value.
+   * Check if a feature flag is enabled: true only for a resolved boolean
+   * `true`. Never throws. Returns false, and logs once per key, for a missing
+   * key, a non-boolean value (no string coercion: a stored "true" is a
+   * string) or a value that could not be read (qfg-zvyy).
    */
   isEnabled(key: string): boolean {
-    return this.get(key) === true;
+    try {
+      const value = this.get(key);
+      if (!this.loaded || key.startsWith(LOG_LEVEL_KEY_PREFIX)) return value === true;
+      const config = this._configs[key];
+      if (!config) {
+        // No config for the current context yet (a context switch is still
+        // fetching): that is "using the default", not a missing flag.
+        if (!this._awaitingSwitchedContext) {
+          this.warnReadFailure(key, `no config found for key "${key}"`);
+        }
+        return false;
+      }
+      if (config.coercionError) {
+        this.warnReadFailure(key, config.coercionError);
+        return false;
+      }
+      if (config.type !== "bool" || typeof config.value !== "boolean") {
+        this.warnReadFailure(key, `config "${key}" has type ${config.type}, expected bool`);
+        return false;
+      }
+      return config.value;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -1557,6 +1616,10 @@ export class Quonfig {
     const config = this.configs[key];
     const value = config?.value;
 
+    if (config?.coercionError && !key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
+      this.warnReadFailure(key, config.coercionError);
+    }
+
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
       // qfg-5jcd: record synchronously. record() is a Map.set + counter
       // increment with no I/O; deferring it via setTimeout(0) caused a tight
@@ -1653,35 +1716,45 @@ export class Quonfig {
   }
 
   /**
-   * Get the evaluated value for a key, asserting it is a Duration.
+   * Get a duration config. Returns `defaultValue` (undefined when omitted)
+   * for a missing key, and for a value that is not a duration: another type
+   * (a stored string "PT1S" is a string, not a duration) or a value outside
+   * the duration grammar. Never throws; a failed read logs once per key
+   * (qfg-zvyy).
    */
-  getDuration(key: string): Duration | undefined {
+  getDuration(key: string, defaultValue?: Duration): Duration | undefined {
     const value = this.get(key);
+    if (!this.loaded) return defaultValue;
 
-    const coercionError = this.configs[key]?.coercionError;
-    if (coercionError) {
-      this.warnCoercionOnce(key, coercionError);
-      return undefined;
+    const config = this._configs[key];
+    if (!config) return defaultValue;
+
+    if (config.coercionError) {
+      this.warnReadFailure(key, config.coercionError);
+      return defaultValue;
     }
 
-    if (!value) {
-      return undefined;
-    }
-
-    if (!isDuration(value)) {
-      throw new Error(`Value for key "${key}" is not a duration`);
+    if (config.type !== "duration" || !isDuration(value)) {
+      this.warnReadFailure(key, `config "${key}" has type ${config.type}, expected duration`);
+      return defaultValue;
     }
 
     return value;
   }
 
-  private warnedCoercionKeys = new Set<string>();
+  private warnedReadFailureKeys = new Set<string>();
 
-  /** One warning per key for a value that could not be coerced (never the raw value). */
-  private warnCoercionOnce(key: string, message: string): void {
-    if (this.warnedCoercionKeys.has(key)) return;
-    this.warnedCoercionKeys.add(key);
-    console.warn(`Quonfig warning: ${message}; returning the default.`);
+  /**
+   * One warning per key per client for a read that returned no value (a
+   * wrong type or a malformed value), so a broken config is not mistaken
+   * for "using the default". Never includes the raw value.
+   */
+  private warnReadFailure(key: string, reason: string): void {
+    if (this.warnedReadFailureKeys.has(key)) return;
+    this.warnedReadFailureKeys.add(key);
+    console.warn(
+      `Quonfig warning: read of "${key}" returned no value; the caller's default applies: ${reason}`
+    );
   }
 
   /**

@@ -42,4 +42,13 @@ describe("package.json", () => {
     }
     expect(missing).toEqual([]);
   });
+
+  // qfg-66ko.6: uuid < 11.1.1 carries GHSA-w5hq-g745-h8pq (v3/v5/v6 buffer bounds). uuid 11 ships
+  // its own types, so @types/uuid must go too (it would shadow them with the v9 signatures).
+  test("depends on a uuid with the GHSA-w5hq-g745-h8pq fix and no @types/uuid", () => {
+    const [major, minor, patch] = require("uuid/package.json").version.split(".").map(Number);
+    expect(major > 11 || (major === 11 && (minor > 1 || (minor === 1 && patch >= 1)))).toBe(true);
+    expect(pkg.dependencies.uuid).toBe("^11.1.1");
+    expect(pkg.devDependencies["@types/uuid"]).toBeUndefined();
+  });
 });

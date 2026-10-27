@@ -31,6 +31,36 @@ if (quonfig.isEnabled("my-flag")) {
 const color = quonfig.get("button-color");
 ```
 
+### Reading values
+
+| Method                            | Returns                                                                                                     |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `get(key)`                        | The evaluated value as stored (no coercion), or `undefined` for a missing key or a value that can't be read |
+| `isEnabled(key)`                  | `true` only for a boolean config whose value is `true`; `false` otherwise. Never throws                     |
+| `getDuration(key, defaultValue?)` | A `{ ms, seconds }` duration, or `defaultValue` (`undefined` when omitted). Never throws                    |
+| `getDetails(key)`                 | `{ value, reason, variant, flagMetadata }`, plus `errorCode` when `reason` is `"ERROR"`                     |
+| `peek(key)`                       | Same value as `get(key)`, without recording an evaluation (for framework bindings)                          |
+
+These follow the typed-getter contract every Quonfig SDK shares:
+
+- **No string coercion.** A stored string `"true"` is a string: `isEnabled` returns `false`. A
+  stored string `"PT1S"` is not a duration: `getDuration` returns your default.
+- **A failed read returns your default.** `getDuration` on a config of another type, or on a value
+  outside the duration grammar, returns `defaultValue`. `isEnabled` returns `false` for a missing
+  key, a non-boolean value or a value that can't be read. A value whose JSON shape does not match
+  its declared type (an `int` holding `"twelve"`) reads as `undefined` from `get`, and `getDetails`
+  reports `reason: "ERROR"`, `errorCode: "TYPE_MISMATCH"`.
+- **One warning per key.** Each of these failed reads logs one `console.warn` per key per client. It
+  names the key, never the value. A missing key is logged only by `isEnabled`.
+
+### Switching context
+
+`updateContext(context)` stops serving the previous context's values at once, before its fetch
+completes. Until the new context's config arrives the client serves the copy cached in this browser
+for that context (marked stale), or nothing (reads return your defaults) when there is none. If the
+fetch fails, the client stays on that copy or on defaults; it never serves the previous user's
+values for the new one. Re-sending the current context changes nothing.
+
 ### When config cannot be loaded at startup
 
 `init()` retries (jittered backoff 0.5s, 1s, 2s, ..., capped at 30s) until it has config or
