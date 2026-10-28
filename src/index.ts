@@ -1,6 +1,7 @@
 import { quonfig, Quonfig, QuonfigBootstrap } from "./quonfig";
 import { QuonfigInitError } from "./initError";
 import type { QuonfigInitErrorReason } from "./initError";
+import type { Logger } from "./sdkLogger";
 import { Config } from "./config";
 import { contextsEqual, encodeContexts, base64Encode } from "./context";
 import version from "./version";
@@ -61,6 +62,7 @@ export {
   EvaluationCallback,
   EvaluationReason,
   InitOptions,
+  Logger,
   OnInitFailure,
   ShouldLogArgs,
   CollectContextMode,

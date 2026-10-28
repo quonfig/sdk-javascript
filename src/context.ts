@@ -1,3 +1,4 @@
+import { consoleLogger, type NormalizedLogger } from "./sdkLogger";
 import type { Contexts, ContextValue } from "./types";
 
 /**
@@ -60,9 +61,12 @@ export const contextsEqual = (a: Contexts, b: Contexts): boolean => {
 /**
  * Validate a Contexts object, logging warnings for invalid structures.
  */
-export const validateContexts = (contexts: Contexts): void => {
+export const validateContexts = (
+  contexts: Contexts,
+  logger: NormalizedLogger = consoleLogger
+): void => {
   if (!Object.values(contexts).every((item: any) => typeof item === "object" && item !== null)) {
-    console.error("Context must be an object where the value of each key is also an object");
+    logger.error("Context must be an object where the value of each key is also an object");
   }
 
   if (
@@ -70,7 +74,7 @@ export const validateContexts = (contexts: Contexts): void => {
       Object.values(item).some((value: any) => typeof value === "object" && value !== null)
     )
   ) {
-    console.error("Nested objects are not supported in context values at this time");
+    logger.error("Nested objects are not supported in context values at this time");
   }
 };
 

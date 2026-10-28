@@ -1,3 +1,4 @@
+import { consoleLogger, type NormalizedLogger } from "../sdkLogger";
 import { headers, TELEMETRY_TIMEOUT, getDefaultTelemetryUrl } from "../apiHelpers";
 
 export type TelemetryUploaderParams = {
@@ -11,6 +12,7 @@ export type TelemetryUploaderParams = {
   /** Per-POST deadline (ms) for {@link TelemetryUploader.post}. Defaults to 10s. */
   timeout?: number;
   clientVersion: string;
+  logger?: NormalizedLogger;
 };
 
 /** What the transport needs from a telemetry response. */
@@ -42,8 +44,17 @@ export default class TelemetryUploader {
   telemetryUrl: string;
   timeout: number;
   clientVersion: string;
+  logger: NormalizedLogger;
 
-  constructor({ sdkKey, telemetryUrl, domain, timeout, clientVersion }: TelemetryUploaderParams) {
+  constructor({
+    sdkKey,
+    telemetryUrl,
+    domain,
+    timeout,
+    clientVersion,
+    logger,
+  }: TelemetryUploaderParams) {
+    this.logger = logger ?? consoleLogger;
     this.sdkKey = sdkKey;
     this.telemetryUrl = telemetryUrl || getDefaultTelemetryUrl({ domain });
     this.timeout = timeout || TELEMETRY_TIMEOUT;
@@ -145,7 +156,7 @@ export default class TelemetryUploader {
         signal: controller.signal,
       });
       if (response.ok) return await response.json();
-      console.warn(
+      this.logger.warn(
         `Quonfig warning: Error uploading telemetry ${response.status} ${response.statusText}`
       );
       return response.status;

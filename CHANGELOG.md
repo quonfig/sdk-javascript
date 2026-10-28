@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- New optional `logger` init option (same shape as `@quonfig/node`'s): every SDK log line, including
+  the `[quonfig] init FAILED` and `init recovered` lines, goes to it instead of `console`. Omitting
+  it keeps the console output unchanged. The `Logger` type is exported (qfg-qgnw).
+
 ## 2.0.0 - unreleased
 
 The typed-getter contract (qfg-zvyy), shared by every Quonfig SDK and pinned by the

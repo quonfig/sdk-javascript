@@ -1,3 +1,4 @@
+import type { Logger } from "./sdkLogger";
 /**
  * Context value type. Inner values are typed as `unknown` so callers can pass
  * loose objects (e.g. a request payload) without upfront narrowing; the
@@ -285,6 +286,17 @@ export type InitOptions = {
    * `shouldLog`.
    */
   loggerKey?: string;
+  /**
+   * Optional logger that receives every SDK log line: init progress and
+   * failure (`[quonfig] init FAILED ...`), recovery (`init recovered`), auth
+   * rejections, poll and telemetry failures, and read warnings. When omitted,
+   * the SDK writes to `console` exactly as before.
+   *
+   * Same shape as `@quonfig/node`'s `logger` option and as `console`, Pino,
+   * Winston and Bunyan: `warn` and `error` are required, `debug` and `info`
+   * are optional (no-ops when absent). Messages keep their `[quonfig]` prefix.
+   */
+  logger?: Logger;
 };
 
 /**
