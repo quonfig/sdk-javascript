@@ -120,6 +120,30 @@ leg logs one `console.info` and polling returns to `frequencyInMs`. `init()` and
 never trigger this slow-poll state; only poll ticks do (`init()` handles a rejected key through
 `onInitFailure`, above). A primary 5xx with a secondary 401 is treated as a transient failure.
 
+### Routing SDK logs (`logger`)
+
+By default the SDK writes its log lines to `console`. Pass `logger` to `init()` to send every SDK
+line to your own logger instead, including the `[quonfig] init FAILED` and `init recovered` lines,
+auth rejections, poll and telemetry failures, and read warnings. Nothing then goes to `console`.
+
+```js
+await quonfig.init({
+  sdkKey: "your-frontend-sdk-key",
+  context,
+  logger: {
+    debug: (message, ...args) => myLogger.debug(message, ...args),
+    info: (message, ...args) => myLogger.info(message, ...args),
+    warn: (message, ...args) => myLogger.warn(message, ...args),
+    error: (message, ...args) => myLogger.error(message, ...args),
+  },
+});
+```
+
+The shape is the same as `@quonfig/node`'s `logger` option, and `console`, Pino, Winston and Bunyan
+loggers fit it directly. `warn` and `error` are required. `debug` and `info` are optional; when they
+are missing, those lines are dropped. Messages keep their `[quonfig]` prefix. The `Logger` type is
+exported.
+
 ## Failover & `QUONFIG_DOMAIN`
 
 By default the SDK derives its URLs from a single domain (default `quonfig.com`) and ships a primary

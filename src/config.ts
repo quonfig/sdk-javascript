@@ -1,3 +1,4 @@
+import type { NormalizedLogger } from "./sdkLogger";
 import type {
   ConfigValue,
   ConfigEvaluationMetadata,
@@ -164,9 +165,10 @@ export class Config {
   /**
    * Parse the server evaluation payload into a map of Config objects.
    */
-  static digest(payload: EvaluationPayload): { [key: string]: Config } {
+  static digest(payload: EvaluationPayload, logger?: NormalizedLogger): { [key: string]: Config } {
     if (payload === undefined) {
-      console.trace("Config.digest called with undefined payload");
+      if (logger) logger.warn("Config.digest called with undefined payload");
+      else console.trace("Config.digest called with undefined payload");
       return Object.create(null);
     }
 

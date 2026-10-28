@@ -7,6 +7,7 @@ import Loader, { type AuthRejection, type LoaderResult, safeErrorText } from "./
 import { DEFAULT_TIMEOUT, DEFAULT_HEDGE_DELAY } from "./apiHelpers";
 import { writeLkg } from "./lkgCache";
 import { shouldLog } from "./logger";
+import { consoleLogger, normalizeLogger, type NormalizedLogger } from "./sdkLogger";
 import { QuonfigInitError } from "./initError";
 
 const LOG_LEVEL_KEY_PREFIX = "log-level";
@@ -219,6 +220,12 @@ export class Quonfig {
   private pageHideListener: (() => void) | undefined;
   private _contexts: Contexts = {};
   private _loggerKey: string | undefined;
+  // Every SDK log line goes through this (qfg-qgnw). `console` until init()
+  // installs the caller's `logger` option.
+  private _logger: NormalizedLogger = consoleLogger;
+  // True when init() was given a `logger` (Config.digest keeps its historical
+  // console.trace otherwise).
+  private _customLogger = false;
   // Encoded signature of the context whose evaluations currently populate
   // `_configs`. Used to decide whether a 304 can be safely no-op'd: a 304 only
   // means "unchanged" for its own context, so if `_configs` holds a different
@@ -309,6 +316,7 @@ export class Quonfig {
     collectEvaluationSummaries = true,
     collectContextMode = "PERIODIC_EXAMPLE",
     loggerKey,
+    logger,
     telemetryFlushIntervalMs,
     telemetryTimeoutMs,
     telemetryMaxRetainedBatches,
@@ -320,7 +328,9 @@ export class Quonfig {
       throw new Error("Context must be provided");
     }
 
-    validateContexts(context);
+    this._logger = normalizeLogger(logger);
+    this._customLogger = logger !== undefined;
+    validateContexts(context, this._logger);
     this._contexts = context;
     this._loggerKey = loggerKey;
 
@@ -342,7 +352,7 @@ export class Quonfig {
     const effectiveTimeout = timeout || DEFAULT_TIMEOUT;
     const effectiveHedgeDelay = hedgeDelay ?? DEFAULT_HEDGE_DELAY;
     if (effectiveTimeout <= effectiveHedgeDelay) {
-      console.warn(
+      this._logger.warn(
         `Quonfig: timeout (${effectiveTimeout}ms) is not above hedgeDelay (${effectiveHedgeDelay}ms). ` +
           `The primary leg is aborted before the parallel hedge can fire, degrading the hedge to ` +
           `error-only failover (the secondary is only tried after the primary fully times out, not ` +
@@ -359,7 +369,7 @@ export class Quonfig {
     // neither, so the default two-leg list never triggers this. Warn once at
     // init so the lost failover is visible instead of silent.
     if (resolvedApiUrls !== undefined && resolvedApiUrls.length < 2) {
-      console.warn(
+      this._logger.warn(
         "Quonfig: explicit apiUrls disables automatic failover to the secondary; " +
           "pass both primary and secondary URLs to keep it"
       );
@@ -393,6 +403,7 @@ export class Quonfig {
       domain,
       timeout: telemetryConfig.timeoutMs,
       clientVersion: clientVersionString,
+      logger: this._logger,
     });
 
     // A re-init replaces the reporter; stop the old one so its timer and
@@ -431,7 +442,7 @@ export class Quonfig {
       if (INIT_FAILURE_MODES.has(onInitFailure)) {
         mode = onInitFailure;
       } else {
-        console.warn(
+        this._logger.warn(
           `[quonfig] unknown onInitFailure "${String(onInitFailure)}"; using "fail". ` +
             `Valid values: "fail", "wait", "continue".`
         );
@@ -446,7 +457,7 @@ export class Quonfig {
     } else if (typeof initTimeout === "number" && Number.isFinite(initTimeout)) {
       effectiveInitTimeout = initTimeout;
     } else if (initTimeout !== undefined) {
-      console.warn(
+      this._logger.warn(
         `[quonfig] invalid initTimeout ${String(initTimeout)}; using ${DEFAULT_INIT_TIMEOUT}ms. ` +
           `Pass a finite number of ms (0 or less = one attempt, then onInitFailure).`
       );
@@ -482,7 +493,7 @@ export class Quonfig {
     this._initFailedOnce = false;
     const timeoutLabel = wholeSecs(initTimeout);
 
-    console.debug(
+    this._logger.debug(
       `[quonfig] init: fetching config (initTimeout=${timeoutLabel}, onInitFailure=${mode})`
     );
 
@@ -533,7 +544,7 @@ export class Quonfig {
         this._backgroundLogTimeoutId = setTimeout(() => {
           this._backgroundLogTimeoutId = undefined;
           if (!looping() || this._ready) return;
-          console.warn(
+          this._logger.warn(
             `[quonfig] still not connected to Quonfig delivery (${minsSecs(Date.now() - startedAt)} since start); ` +
               `serving ${this._stale ? "cache" : "defaults"}.${errsPart()}`
           );
@@ -588,12 +599,12 @@ export class Quonfig {
           // first-failure line, so the "retrying until initTimeout" WARN is
           // skipped.
           if (attempt === 1 && initTimeout > 0) {
-            console.warn(
+            this._logger.warn(
               `[quonfig] init: config not loaded yet, retrying until initTimeout (${timeoutLabel}).${errsPart()}`
             );
           } else if (attempt > 1 && now >= nextProgressAt) {
             const timedOut = elapsed >= initTimeout;
-            console.warn(
+            this._logger.warn(
               timedOut
                 ? `[quonfig] init: still blocked waiting for config (${minsSecs(elapsed)} elapsed, attempt ${attempt}).${errsPart()}`
                 : `[quonfig] init: still waiting for config (${secs(elapsed)} elapsed of ${timeoutLabel}, attempt ${attempt}).${errsPart()}`
@@ -611,16 +622,16 @@ export class Quonfig {
             const head = `SDK key rejected (${rejection.status}) by ${legs}. Check the key and environment.`;
             if (mode === "fail") {
               const message = `[quonfig] init FAILED: ${head} onInitFailure=fail: raising now.`;
-              console.error(message);
+              this._logger.error(message);
               finish(new QuonfigInitError("unauthorized", message, error));
             } else if (mode === "continue") {
-              console.warn(
+              this._logger.warn(
                 `[quonfig] init: ${head} onInitFailure=continue: STARTING ON CODE DEFAULTS. Retrying in background.`
               );
               finish();
             } else {
               // Client SDKs log ERROR only under fail (design doc section C).
-              console.warn(
+              this._logger.warn(
                 `[quonfig] init: ${head} onInitFailure=wait: still blocking startup and retrying.`
               );
             }
@@ -689,7 +700,7 @@ export class Quonfig {
               // be visible above DEBUG. Logged once; later cache-fallback
               // attempts are covered by the background "serving cache" WARN.
               if (this._stale) {
-                console.warn(
+                this._logger.warn(
                   `[quonfig] init: config not loaded from delivery. onInitFailure=${mode}: ` +
                     `STARTING ON ${this.cachedConfigLabel()}. This instance may disagree with the rest ` +
                     `of your fleet. Retrying in background.${errsPart()}`
@@ -738,7 +749,7 @@ export class Quonfig {
         // it now rather than on code defaults (or a rejection).
         if (this.installCachedCopy()) {
           this._initFailedOnce = true;
-          console.warn(
+          this._logger.warn(
             `[quonfig] init: no config after ${elapsed}. onInitFailure=${mode}: STARTING ON ` +
               `${this.cachedConfigLabel()}. This instance may disagree with the rest of your fleet. ` +
               `Retrying in background.`
@@ -751,7 +762,7 @@ export class Quonfig {
             `[quonfig] init FAILED: no config after ${elapsed}.${errsPart()} onInitFailure=fail: ` +
             `raising QuonfigInitError. Options: onInitFailure=wait to keep waiting, ` +
             `onInitFailure=continue to start on code defaults, or raise initTimeout.`;
-          console.error(message);
+          this._logger.error(message);
           // The deadline cuts an attempt in flight, as sdk-go's does: that one
           // is the last attempt, and its pending legs hung.
           const hung = attemptInFlight
@@ -759,13 +770,13 @@ export class Quonfig {
             : attemptsCompleted === 0 || lastAttemptHung;
           finish(new QuonfigInitError(hung ? "timeout" : "unavailable", message, lastError));
         } else if (mode === "continue") {
-          console.warn(
+          this._logger.warn(
             `[quonfig] init: no config after ${elapsed}. onInitFailure=continue: STARTING ON CODE DEFAULTS. ` +
               `This instance may disagree with the rest of your fleet. Retrying in background.`
           );
           finish();
         } else {
-          console.warn(
+          this._logger.warn(
             `[quonfig] init: no config after ${elapsed}. onInitFailure=wait: still blocking startup and ` +
               `retrying indefinitely.${errsPart()} Use onInitFailure=fail or continue to bound startup.`
           );
@@ -845,7 +856,7 @@ export class Quonfig {
         : this._heldGeneration > 0
           ? ` (generation ${this._heldGeneration})`
           : "";
-      console.info(
+      this._logger.info(
         `[quonfig] init recovered: config loaded after ${elapsed}${leg}${version}. Now serving live config.`
       );
     }
@@ -1140,7 +1151,7 @@ export class Quonfig {
       throw new Error("Quonfig not initialized. Call init() first.");
     }
 
-    validateContexts(context);
+    validateContexts(context, this._logger);
     this._contexts = context;
     this.switchServedContext(encodeContexts(context));
 
@@ -1251,25 +1262,25 @@ export class Quonfig {
       if (rejection) {
         if (!this._authFailed) {
           this._authFailed = true;
-          console.error(
+          this._logger.error(
             `[quonfig] config fetch rejected: the SDK key is invalid or revoked (check the SDK key) ` +
               `status=${rejection.status} host=${rejection.host}; keeping the current config and ` +
               `polling once every ${AUTH_PROBE_MIN_MS / 1000}-${(AUTH_PROBE_MIN_MS + AUTH_PROBE_SPAN_MS) / 1000}s ` +
               `(or every ${frequencyInMs}ms if longer) until a fetch succeeds`
           );
         } else {
-          console.debug(
+          this._logger.debug(
             `[quonfig] auth-failed probe rejected (status=${rejection.status} host=${rejection.host})`
           );
         }
       } else if (this._authFailed) {
         if (accepted) {
           this._authFailed = false;
-          console.info(
+          this._logger.info(
             `[quonfig] config fetch accepted; leaving auth-failed and resuming polling every ${frequencyInMs}ms`
           );
         } else {
-          console.debug("[quonfig] auth-failed probe failed; still auth-failed");
+          this._logger.debug("[quonfig] auth-failed probe failed; still auth-failed");
         }
       }
     };
@@ -1308,7 +1319,7 @@ export class Quonfig {
           if (!this._pollOutage) {
             this._pollOutage = true;
             const message = error instanceof Error ? error.message : String(error);
-            console.warn(
+            this._logger.warn(
               `[quonfig] poll failed (${message}); keeping the current config and retrying every ${frequencyInMs}ms`
             );
           }
@@ -1395,7 +1406,7 @@ export class Quonfig {
     this.pageHideListener = undefined;
   }
 
-  /** Console-backed P7 logger; debug is gated by {@link TELEMETRY_LOG_LEVEL_KEY}. */
+  /** P7 telemetry logger over the SDK logger; debug is gated by {@link TELEMETRY_LOG_LEVEL_KEY}. */
   private telemetryLogger(): TelemetryLogger {
     const prefix = (message: string) => `[quonfig] ${message}`;
     return {
@@ -1410,11 +1421,11 @@ export class Quonfig {
         } catch {
           // Logging must never break telemetry.
         }
-        if (enabled) console.debug(prefix(message));
+        if (enabled) this._logger.debug(prefix(message));
       },
-      info: (message) => console.info(prefix(message)),
-      warn: (message) => console.warn(prefix(message)),
-      error: (message) => console.error(prefix(message)),
+      info: (message) => this._logger.info(prefix(message)),
+      warn: (message) => this._logger.warn(prefix(message)),
+      error: (message) => this._logger.error(prefix(message)),
     };
   }
 
@@ -1428,7 +1439,7 @@ export class Quonfig {
    * source of truth and intentionally skips the guard).
    */
   setConfig(rawValues: EvaluationPayload) {
-    this._configs = Config.digest(rawValues);
+    this._configs = Config.digest(rawValues, this._customLogger ? this._logger : undefined);
     this._awaitingSwitchedContext = false;
     this._heldGeneration = rawValues?.meta?.generation ?? 0;
     this._configInstalls += 1;
@@ -1606,7 +1617,7 @@ export class Quonfig {
   get(key: string): ConfigValue {
     if (!this.loaded) {
       if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
-        console.warn(
+        this._logger.warn(
           `Quonfig warning: The client has not finished loading data yet. Unable to look up actual value for key "${key}".`
         );
       }
@@ -1752,7 +1763,7 @@ export class Quonfig {
   private warnReadFailure(key: string, reason: string): void {
     if (this.warnedReadFailureKeys.has(key)) return;
     this.warnedReadFailureKeys.add(key);
-    console.warn(
+    this._logger.warn(
       `Quonfig warning: read of "${key}" returned no value; the caller's default applies: ${reason}`
     );
   }
