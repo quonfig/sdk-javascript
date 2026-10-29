@@ -49,7 +49,7 @@ These follow the typed-getter contract every Quonfig SDK shares:
   outside the duration grammar, returns `defaultValue`. `isEnabled` returns `false` for a missing
   key, a non-boolean value or a value that can't be read. A value whose JSON shape does not match
   its declared type (an `int` holding `"twelve"`) reads as `undefined` from `get`, and `getDetails`
-  reports `reason: "ERROR"`, `errorCode: "TYPE_MISMATCH"`.
+  reports `reason: "ERROR"`, `errorCode: "PARSE_ERROR"`.
 - **One warning per key.** Each of these failed reads logs one `console.warn` per key per client. It
   names the key, never the value. A missing key is logged only by `isEnabled`.
 

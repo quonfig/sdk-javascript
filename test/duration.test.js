@@ -82,7 +82,7 @@ describe("malformed duration contract", () => {
     const q = clientWith({ "bad.duration": durationEval("P1W") });
     const details = q.getDetails("bad.duration");
     expect(details.reason).toBe("ERROR");
-    expect(details.errorCode).toBe("TYPE_MISMATCH");
+    expect(details.errorCode).toBe("PARSE_ERROR");
     expect(details.value).toBeUndefined();
   });
 

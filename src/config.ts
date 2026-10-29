@@ -1,6 +1,7 @@
 import type { NormalizedLogger } from "./sdkLogger";
 import type {
   ConfigValue,
+  EvaluationErrorCode,
   ConfigEvaluationMetadata,
   EvaluatedValue,
   Evaluation,
@@ -138,6 +139,12 @@ export class Config {
    * Never contains the raw value.
    */
   coercionError: string | undefined;
+  /**
+   * The `getDetails` error code for `coercionError`: PARSE_ERROR for a value
+   * that cannot be parsed as its declared type, TYPE_MISMATCH for an entry
+   * that could not be decoded at all (qfg-wg1n).
+   */
+  coercionErrorCode: EvaluationErrorCode | undefined;
 
   constructor(
     key: string,
@@ -153,12 +160,14 @@ export class Config {
     this.configEvaluationMetadata = metadata;
     if (type === "duration" && value === undefined && rawValue !== undefined) {
       this.coercionError = `Value for key "${key}" is not a valid ISO 8601 duration`;
+      this.coercionErrorCode = "PARSE_ERROR";
     } else if (rawValue !== undefined && !matchesDeclaredType(type, value)) {
       // A server value whose JSON shape does not match its declared type (an
       // "int" carrying "twelve", a "bool" carrying "true") is a failed read,
       // never a coerced one (qfg-zvyy, qfg-zqoh). Never echoes the value.
       this.value = undefined;
       this.coercionError = `Value for key "${key}" is not a valid ${type}`;
+      this.coercionErrorCode = "PARSE_ERROR";
     }
   }
 
@@ -222,6 +231,7 @@ export class Config {
     const config = new Config(key, undefined, type, undefined, ev && Config.metadataFor(ev));
     const reason = error instanceof Error ? error.message : String(error);
     config.coercionError = `Value for key "${key}" could not be decoded: ${reason}`;
+    config.coercionErrorCode = "TYPE_MISMATCH";
     return config;
   }
 }
