@@ -1681,7 +1681,7 @@ export class Quonfig {
       return {
         value: undefined,
         reason: "ERROR",
-        errorCode: "TYPE_MISMATCH",
+        errorCode: config.coercionErrorCode ?? "TYPE_MISMATCH",
         errorMessage: config.coercionError,
         variant: "default",
         flagMetadata: buildFlagMetadata(

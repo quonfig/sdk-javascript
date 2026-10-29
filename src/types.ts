@@ -92,8 +92,13 @@ export type EvaluationReason =
   | "STALE"
   | "ERROR";
 
-/** Error code attached to `getDetails` results when `reason === "ERROR"`. */
-export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "GENERAL";
+/**
+ * Error code attached to `getDetails` results when `reason === "ERROR"`.
+ * `PARSE_ERROR`: the value could not be parsed as its declared type (a
+ * malformed int, double or duration). `TYPE_MISMATCH`: the entry could not be
+ * decoded at all (e.g. a json value sent as a string).
+ */
+export type EvaluationErrorCode = "FLAG_NOT_FOUND" | "TYPE_MISMATCH" | "PARSE_ERROR" | "GENERAL";
 
 /**
  * Result of `Quonfig.getDetails(key)`. Mirrors sdk-node's `EvaluationDetails`

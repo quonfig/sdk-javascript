@@ -1,12 +1,23 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 - 2026-10-29
 
+- **`getDetails` reports `PARSE_ERROR` for a malformed value (qfg-wg1n).** A config whose value
+  cannot be parsed as its declared type (an `int` holding `"twelve"` or `3.5`, a `double` holding
+  `"abc"`, a `duration` outside the grammar, a `bool` holding `"true"`, or an ENV_VAR-provided value
+  that reached the browser unresolved) still reads as `undefined` with reason `ERROR`, but the error
+  code is now `PARSE_ERROR` (was `TYPE_MISMATCH`). An entry that cannot be decoded at all (a `json`
+  value sent as a string) stays `TYPE_MISMATCH`. `@quonfig/openfeature-web` 2.2.0+ passes the code
+  straight through; upgrade it with this SDK, since older provider versions report an unknown code
+  as `GENERAL`. This is an edge-case error-path change: api-delivery does not send such values to a
+  frontend key today, and `get`, `isEnabled` and `getDuration` return the same values as before. The
+  `EvaluationErrorCode` union gains `"PARSE_ERROR"`; an exhaustive `switch` over it needs a new
+  case. Approved as a minor under Jeff's edge-case semver policy (qfg-wg1n, 2026-10-29).
 - New optional `logger` init option (same shape as `@quonfig/node`'s): every SDK log line, including
   the `[quonfig] init FAILED` and `init recovered` lines, goes to it instead of `console`. Omitting
   it keeps the console output unchanged. The `Logger` type is exported (qfg-qgnw).
 
-## 2.0.0 - unreleased
+## 2.0.0 - 2026-10-27
 
 The typed-getter contract (qfg-zvyy), shared by every Quonfig SDK and pinned by the
 integration-test-data matrix (`getter.contract.*`; this SDK runs a port of it in

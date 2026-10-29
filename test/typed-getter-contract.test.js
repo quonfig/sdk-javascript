@@ -185,14 +185,17 @@ describe("typed-getter contract: malformed stored values (qfg-zqoh)", () => {
     expect(q.get(KEY(name))).toBeUndefined();
   });
 
-  test.each(malformed)("getDetails on a malformed %s reports ERROR / TYPE_MISMATCH", (name) => {
-    const q = loadedClient();
-    const details = q.getDetails(KEY(name));
-    expect(details.reason).toBe("ERROR");
-    expect(details.errorCode).toBe("TYPE_MISMATCH");
-    expect(details.value).toBeUndefined();
-    expect(details.errorMessage).not.toMatch(/twelve|abc/);
-  });
+  test.each(malformed)(
+    "getDetails on a malformed %s reports ERROR / PARSE_ERROR (qfg-wg1n)",
+    (name) => {
+      const q = loadedClient();
+      const details = q.getDetails(KEY(name));
+      expect(details.reason).toBe("ERROR");
+      expect(details.errorCode).toBe("PARSE_ERROR");
+      expect(details.value).toBeUndefined();
+      expect(details.errorMessage).not.toMatch(/twelve|abc/);
+    }
+  );
 
   test.each([
     ["bool", "true"],
@@ -205,7 +208,7 @@ describe("typed-getter contract: malformed stored values (qfg-zqoh)", () => {
     const q = new Quonfig();
     q.setConfig({ evaluations: { k: { value: { type, value }, configId: "c" } } });
     expect(q.get("k")).toBeUndefined();
-    expect(q.getDetails("k").errorCode).toBe("TYPE_MISMATCH");
+    expect(q.getDetails("k").errorCode).toBe("PARSE_ERROR");
   });
 
   test("a malformed read logs once per key, never the raw value", () => {
