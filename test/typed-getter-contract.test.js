@@ -232,3 +232,53 @@ describe("typed-getter contract: malformed stored values (qfg-zqoh)", () => {
     expect(logs.logCount("warn")).toBe(0);
   });
 });
+
+// The read-failure WARN must say what the read actually did. get() takes no
+// default, so "the caller's default applies" would be false there.
+describe("read-failure WARN states the real outcome", () => {
+  let logs;
+  beforeEach(() => {
+    logs = captureConsole();
+  });
+  afterEach(() => logs.restore());
+
+  const warnFor = (name) => {
+    const re = new RegExp(`read of "${KEY(name).replace(/\./g, "\\.")}"`);
+    const found = logs.lines.filter((l) => l.level === "warn" && re.test(l.msg));
+    expect(found).toHaveLength(1);
+    return found[0].msg;
+  };
+
+  test("get() on a malformed value says it returns undefined", () => {
+    const q = loadedClient();
+    expect(q.get(KEY("int.malformed"))).toBeUndefined();
+    const line = warnFor("int.malformed");
+    expect(line).toContain("failed (");
+    expect(line).toContain("returning undefined");
+    expect(line).not.toContain("default applies");
+  });
+
+  test("isEnabled on a malformed value says it returns false", () => {
+    const q = loadedClient();
+    expect(q.isEnabled(KEY("int.malformed"))).toBe(false);
+    expect(warnFor("int.malformed")).toContain("returning false");
+  });
+
+  test("isEnabled on a non-boolean says it returns false", () => {
+    const q = loadedClient();
+    expect(q.isEnabled(KEY("string"))).toBe(false);
+    expect(warnFor("string")).toContain("returning false");
+  });
+
+  test("getDuration with a default says the caller's default is returned", () => {
+    const q = loadedClient();
+    expect(q.getDuration(KEY("int.malformed"), DEFAULT_DURATION)).toBe(DEFAULT_DURATION);
+    expect(warnFor("int.malformed")).toContain("returning the caller's default");
+  });
+
+  test("getDuration with no default says it returns undefined", () => {
+    const q = loadedClient();
+    expect(q.getDuration(KEY("string.duration"))).toBeUndefined();
+    expect(warnFor("string.duration")).toContain("returning undefined");
+  });
+});
