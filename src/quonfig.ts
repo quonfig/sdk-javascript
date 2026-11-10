@@ -30,6 +30,11 @@ import type {
   OnInitFailure,
 } from "./types";
 
+// What a failed read returns, for the once-per-key read-failure WARN.
+const CALLER_DEFAULT_OUTCOME = "returning the caller's default";
+const NO_DEFAULT_OUTCOME = "no default was passed, returning undefined";
+const IS_ENABLED_OUTCOME = "returning false";
+
 /**
  * Build the OpenFeature `variant` string per the cross-SDK spec
  * (project/plans/openfeature-resolution-details.md §2).
@@ -1487,23 +1492,27 @@ export class Quonfig {
    */
   isEnabled(key: string): boolean {
     try {
-      const value = this.get(key);
+      const value = this.readValue(key, IS_ENABLED_OUTCOME);
       if (!this.loaded || key.startsWith(LOG_LEVEL_KEY_PREFIX)) return value === true;
       const config = this._configs[key];
       if (!config) {
         // No config for the current context yet (a context switch is still
         // fetching): that is "using the default", not a missing flag.
         if (!this._awaitingSwitchedContext) {
-          this.warnReadFailure(key, `no config found for key "${key}"`);
+          this.warnReadFailure(key, `no config found for key "${key}"`, IS_ENABLED_OUTCOME);
         }
         return false;
       }
       if (config.coercionError) {
-        this.warnReadFailure(key, config.coercionError);
+        this.warnReadFailure(key, config.coercionError, IS_ENABLED_OUTCOME);
         return false;
       }
       if (config.type !== "bool" || typeof config.value !== "boolean") {
-        this.warnReadFailure(key, `config "${key}" has type ${config.type}, expected bool`);
+        this.warnReadFailure(
+          key,
+          `config "${key}" has type ${config.type}, expected bool`,
+          IS_ENABLED_OUTCOME
+        );
         return false;
       }
       return config.value;
@@ -1615,6 +1624,14 @@ export class Quonfig {
    * Get the evaluated value for a config key.
    */
   get(key: string): ConfigValue {
+    return this.readValue(key, NO_DEFAULT_OUTCOME);
+  }
+
+  /**
+   * `get()` with the read-failure WARN's `outcome` supplied by the caller, so
+   * isEnabled / getDuration report what they actually return.
+   */
+  private readValue(key: string, outcome: string): ConfigValue {
     if (!this.loaded) {
       if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
         this._logger.warn(
@@ -1628,7 +1645,7 @@ export class Quonfig {
     const value = config?.value;
 
     if (config?.coercionError && !key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
-      this.warnReadFailure(key, config.coercionError);
+      this.warnReadFailure(key, config.coercionError, outcome);
     }
 
     if (!key.startsWith(LOG_LEVEL_KEY_PREFIX)) {
@@ -1734,19 +1751,24 @@ export class Quonfig {
    * (qfg-zvyy).
    */
   getDuration(key: string, defaultValue?: Duration): Duration | undefined {
-    const value = this.get(key);
+    const outcome = defaultValue !== undefined ? CALLER_DEFAULT_OUTCOME : NO_DEFAULT_OUTCOME;
+    const value = this.readValue(key, outcome);
     if (!this.loaded) return defaultValue;
 
     const config = this._configs[key];
     if (!config) return defaultValue;
 
     if (config.coercionError) {
-      this.warnReadFailure(key, config.coercionError);
+      this.warnReadFailure(key, config.coercionError, outcome);
       return defaultValue;
     }
 
     if (config.type !== "duration" || !isDuration(value)) {
-      this.warnReadFailure(key, `config "${key}" has type ${config.type}, expected duration`);
+      this.warnReadFailure(
+        key,
+        `config "${key}" has type ${config.type}, expected duration`,
+        outcome
+      );
       return defaultValue;
     }
 
@@ -1758,14 +1780,14 @@ export class Quonfig {
   /**
    * One warning per key per client for a read that returned no value (a
    * wrong type or a malformed value), so a broken config is not mistaken
-   * for "using the default". Never includes the raw value.
+   * for "using the default". Never includes the raw value. `outcome` says
+   * what the read then returned (the caller's default, undefined, or false),
+   * so the line never claims a default applied when there was none.
    */
-  private warnReadFailure(key: string, reason: string): void {
+  private warnReadFailure(key: string, reason: string, outcome: string): void {
     if (this.warnedReadFailureKeys.has(key)) return;
     this.warnedReadFailureKeys.add(key);
-    this._logger.warn(
-      `Quonfig warning: read of "${key}" returned no value; the caller's default applies: ${reason}`
-    );
+    this._logger.warn(`Quonfig warning: read of "${key}" failed (${reason}); ${outcome}`);
   }
 
   /**
